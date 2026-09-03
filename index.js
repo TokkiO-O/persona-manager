@@ -1,36 +1,89 @@
-import { getContext, extension_settings, saveSettingsDebounced } from '../../../extensions.js';
+import { getContext, extension_settings } from '../../../extensions.js';
 import { eventSource, event_types } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
-import { getUserAvatars, getThumbnailUrl } from '../../../personas.js';
+import { getThumbnailUrl } from '../../../personas.js';
 
 const EXT = 'persona-manager-pro';
 const STORAGE_KEY = 'persona-manager-pro-data';
 
-/** 只存别名等数据到 accountStorage，绝不碰 settings.json */
-function loadData() {
+let pmpData = {
+    aliases: {},
+    preferNicknames: true,
+};
+
+let personaObserver = null;
+let injectTimer = null;
+
+/**
+ * 获取 SillyTavern 当前上下文里的 accountStorage。
+ * 不能直接使用全局 accountStorage：它不是 window 全局变量。
+ */
+function getAccountStorage() {
     try {
-        const raw = accountStorage.getItem(STORAGE_KEY);
-        return raw ? JSON.parse(raw) : { aliases: {}, preferNicknames: true };
-    } catch {
+        const context = getContext();
+        return context?.accountStorage ?? null;
+    } catch (error) {
+        console.error(`[${EXT}] 获取 accountStorage 失败`, error);
+        return null;
+    }
+}
+
+function loadData() {
+    const storage = getAccountStorage();
+
+    if (!storage) {
+        console.warn(`[${EXT}] accountStorage 不可用，暂时使用 localStorage`);
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            return raw ? JSON.parse(raw) : { aliases: {}, preferNicknames: true };
+        } catch {
+            return { aliases: {}, preferNicknames: true };
+        }
+    }
+
+    try {
+        const raw = storage.getItem(STORAGE_KEY);
+        const data = raw ? JSON.parse(raw) : {};
+        return {
+            aliases: data?.aliases && typeof data.aliases === 'object' ? data.aliases : {},
+            preferNicknames: data?.preferNicknames !== false,
+        };
+    } catch (error) {
+        console.error(`[${EXT}] 读取数据失败`, error);
         return { aliases: {}, preferNicknames: true };
     }
 }
 
 function saveData(data) {
-    accountStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const storage = getAccountStorage();
+    const serialized = JSON.stringify({
+        aliases: data.aliases || {},
+        preferNicknames: data.preferNicknames !== false,
+    });
+
+    try {
+        if (storage) {
+            storage.setItem(STORAGE_KEY, serialized);
+        } else {
+            localStorage.setItem(STORAGE_KEY, serialized);
+        }
+        return true;
+    } catch (error) {
+        console.error(`[${EXT}] 保存数据失败`, error);
+        toastr.error('Persona Manager：别名保存失败');
+        return false;
+    }
 }
 
-let pmpData = loadData();
-
-/** 官方 Nicknames 兼容读取 */
 function getOfficialNickname(avatarId) {
     try {
         const nick = extension_settings?.nicknames;
-        if (!nick?.personas) return null;
-        const entry = nick.personas[avatarId];
-        if (typeof entry === 'string') return entry;
-        if (entry?.global) return entry.global;
-        if (entry?.nickname) return entry.nickname;
+        const entry = nick?.personas?.[avatarId];
+
+        if (typeof entry === 'string') return entry.trim() || null;
+        if (entry?.global) return String(entry.global).trim() || null;
+        if (entry?.nickname) return String(entry.nickname).trim() || null;
+
         return null;
     } catch {
         return null;
@@ -42,70 +95,88 @@ function getDisplayName(avatarId, originalName) {
         const official = getOfficialNickname(avatarId);
         if (official) return official;
     }
+
     return pmpData.aliases[avatarId] || originalName || avatarId;
 }
 
 function getAllPersonas() {
-    const personas = power_user.personas || {};
-    const descs = power_user.persona_descriptions || {};
-    const avatarList = (typeof getUserAvatars === 'function' ? null : Object.keys(personas)) || Object.keys(personas);
+    const personas = power_user?.personas || {};
+    const descriptions = power_user?.persona_descriptions || {};
 
-    return Object.keys(personas).map(avatarId => {
-        const name = personas[avatarId] || avatarId;
-        const d = descs[avatarId] || {};
+    return Object.keys(personas).map((avatarId) => {
+        const name = String(personas[avatarId] || '[Unnamed Persona]');
+        const d = descriptions[avatarId] || {};
+
         return {
             avatarId,
             name,
             displayName: getDisplayName(avatarId, name),
             alias: pmpData.aliases[avatarId] || '',
             officialNickname: getOfficialNickname(avatarId),
-            description: d.description || '',
-            title: d.title || '',
-            thumb: (typeof getThumbnailUrl === 'function')
-                ? getThumbnailUrl('persona', avatarId)
-                : `/useravatars/${avatarId}`,
+            description: String(d.description || ''),
+            title: String(d.title || ''),
+            thumb: getThumbnailUrl('persona', avatarId),
         };
     });
 }
 
-/** 同名分组 */
 function groupByName() {
     const map = new Map();
-    getAllPersonas().forEach(p => {
-        if (!map.has(p.name)) map.set(p.name, []);
-        map.get(p.name).push(p);
-    });
-    return [...map.entries()].filter(([, arr]) => arr.length > 1);
+
+    for (const persona of getAllPersonas()) {
+        if (!map.has(persona.name)) {
+            map.set(persona.name, []);
+        }
+        map.get(persona.name).push(persona);
+    }
+
+    return [...map.entries()].filter(([, list]) => list.length > 1);
 }
 
-/** 内容重复检测 */
 function findContentDuplicates() {
     const map = new Map();
-    getAllPersonas().forEach(p => {
-        const key = `${(p.description || '').trim()}|||${(p.title || '').trim()}`;
-        if (!key || key === '|||') return;
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(p);
-    });
-    return [...map.values()].filter(arr => arr.length > 1);
+
+    for (const persona of getAllPersonas()) {
+        const description = persona.description.trim();
+        const title = persona.title.trim();
+
+        if (!description && !title) continue;
+
+        const key = `${description}\u0000${title}`;
+
+        if (!map.has(key)) {
+            map.set(key, []);
+        }
+
+        map.get(key).push(persona);
+    }
+
+    return [...map.values()].filter((list) => list.length > 1);
 }
 
-function escapeHtml(str) {
-    return String(str)
+function escapeHtml(value) {
+    return String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function escapeAttribute(value) {
+    return escapeHtml(value).replace(/`/g, '&#096;');
 }
 
 function renderDiff(textA, textB) {
-    const linesA = (textA || '').split('\n');
-    const linesB = (textB || '').split('\n');
+    const linesA = String(textA || '').split('\n');
+    const linesB = String(textB || '').split('\n');
     const max = Math.max(linesA.length, linesB.length);
     let html = '';
+
     for (let i = 0; i < max; i++) {
         const a = linesA[i] ?? '';
         const b = linesB[i] ?? '';
+
         if (a === b) {
             html += `<div class="pmp-line same">${escapeHtml(a) || '&nbsp;'}</div>`;
         } else {
@@ -113,91 +184,150 @@ function renderDiff(textA, textB) {
             if (b) html += `<div class="pmp-line added">${escapeHtml(b)}</div>`;
         }
     }
+
     return html;
 }
 
-/** ========== 原生 Persona 列表注入二次别名（方案 A） ========== */
+/**
+ * 给 Persona 列表顶部加入扩展工具栏。
+ * 不再依赖 #persona-management-button / #rm_extensions_block 等旧选择器。
+ */
+function injectToolbar() {
+    const $block = $('#user_avatar_block');
+
+    if (!$block.length) return false;
+
+    if ($('#pmp-toolbar').length) return true;
+
+    const $toolbar = $(`
+        <div id="pmp-toolbar" class="pmp-toolbar">
+            <div class="pmp-toolbar-title">
+                <i class="fa-solid fa-id-card"></i>
+                <span>Persona Manager</span>
+            </div>
+            <button id="pmp-open-btn" class="menu_button pmp-open-btn" type="button">
+                <i class="fa-solid fa-code-compare"></i>
+                <span>Persona 对比 / 重复检测</span>
+            </button>
+        </div>
+    `);
+
+    // #user_avatar_block 本身是 Persona 卡片容器，因此 toolbar 也作为它的第一个子项。
+    // CSS 用 grid-column / flex-basis 让它独占一行。
+    $block.prepend($toolbar);
+
+    return true;
+}
+
+/**
+ * 给每张原生 Persona 卡片增加二次别名。
+ * 当前 ST 的真实结构是 .avatar-container[data-avatar-id].
+ */
 function injectAliasIntoNativeList() {
     const $block = $('#user_avatar_block');
-    if (!$block.length) return;
 
-    $block.find('.avatar-container, [data-avatar-id]').each(function () {
+    if (!$block.length) return 0;
+
+    let count = 0;
+
+    $block.find('.avatar-container[data-avatar-id]').each(function () {
         const $card = $(this);
-        let avatarId = $card.attr('data-avatar-id') || $card.find('[data-avatar-id]').attr('data-avatar-id');
-        if (!avatarId) return;
+        const avatarId = String($card.attr('data-avatar-id') || '').trim();
 
-        // 已经注入过就跳过
-        if ($card.find('.pmp-alias-inline').length) return;
+        if (!avatarId || $card.find('.pmp-alias-inline').length) {
+            return;
+        }
 
         const currentAlias = pmpData.aliases[avatarId] || '';
-        const $input = $(`
-            <div class="pmp-alias-inline">
-                <input type="text" class="text_pole pmp-alias-input-native" 
-                       data-id="${avatarId}" 
-                       value="${escapeHtml(currentAlias)}" 
-                       placeholder="二次别名（仅本界面）"
-                       title="二次别名，只在 Persona 界面显示，不影响原名和游玩">
+
+        const $alias = $(`
+            <div class="pmp-alias-inline" data-pmp-id="${escapeAttribute(avatarId)}">
+                <label class="pmp-alias-label" title="只用于 Persona 管理界面区分，不会修改 Persona 原名">
+                    二次别名
+                </label>
+                <input
+                    type="text"
+                    class="text_pole pmp-alias-input-native"
+                    data-id="${escapeAttribute(avatarId)}"
+                    value="${escapeAttribute(currentAlias)}"
+                    placeholder="例如：金发版 / 工作版"
+                    autocomplete="off"
+                    spellcheck="false"
+                >
             </div>
         `);
 
-        // 找一个合适的位置插入（名字旁边或卡片底部）
-        const $nameArea = $card.find('.ch_name, .name, .persona_name, .avatar_name').first();
-        if ($nameArea.length) {
-            $nameArea.after($input);
+        // 当前 ST 的 Persona 卡片有 .character_select_container。
+        // 放在这个内容区末尾，比直接 append 到卡片最稳定。
+        const $content = $card.find('.character_select_container').first();
+
+        if ($content.length) {
+            $content.append($alias);
         } else {
-            $card.append($input);
+            $card.append($alias);
         }
+
+        count++;
+    });
+
+    return count;
+}
+
+function saveAlias(id, value) {
+    const avatarId = String(id || '').trim();
+    const alias = String(value || '').trim();
+
+    if (!avatarId) return;
+
+    if (alias) {
+        pmpData.aliases[avatarId] = alias;
+    } else {
+        delete pmpData.aliases[avatarId];
+    }
+
+    if (saveData(pmpData)) {
+        $(document).trigger('pmp:alias-saved', { avatarId, alias });
+    }
+}
+
+function bindEvents() {
+    // 命名空间事件，避免扩展重复加载后绑定多次。
+    $(document).off('.personaManagerPro');
+
+    $(document).on('click.personaManagerPro', '#pmp-open-btn', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openManagerPopup();
+    });
+
+    $(document).on('click.personaManagerPro', '.pmp-alias-inline, .pmp-alias-inline *', (event) => {
+        event.stopPropagation();
+    });
+
+    $(document).on('mousedown.personaManagerPro', '.pmp-alias-input-native', (event) => {
+        event.stopPropagation();
+    });
+
+    $(document).on('change.personaManagerPro blur.personaManagerPro', '.pmp-alias-input-native', function () {
+        saveAlias($(this).attr('data-id'), $(this).val());
     });
 }
 
-/** 保存原生列表里的别名输入 */
-function bindNativeAliasSave() {
-    $(document).on('change blur', '.pmp-alias-input-native', function () {
-        const id = $(this).data('id');
-        const val = $(this).val().trim();
-        if (val) {
-            pmpData.aliases[id] = val;
-        } else {
-            delete pmpData.aliases[id];
-        }
-        saveData(pmpData);
-        // 可选提示
-        // toastr.info('别名已保存', '', { timeOut: 1000 });
-    });
-}
-
-/** 监听列表重新渲染 */
-function watchPersonaList() {
-    const target = document.getElementById('user_avatar_block');
-    if (!target) return;
-
-    const observer = new MutationObserver(debounce(() => {
-        injectAliasIntoNativeList();
-    }, 150));
-
-    observer.observe(target, { childList: true, subtree: true });
-}
-
-/** 简单 debounce */
-function debounce(fn, delay) {
-    let timer;
-    return function (...args) {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn.apply(this, args), delay);
-    };
-}
-
-/** ========== 对比弹窗（保留之前的功能） ========== */
 function openManagerPopup() {
+    $('#pmp-popup').remove();
+
     const $popup = $(`
-        <div id="pmp-popup" class="pmp-popup">
+        <div id="pmp-popup" class="pmp-popup" role="dialog" aria-modal="true">
             <div class="pmp-header">
-                <h3>Persona Manager Pro</h3>
-                <div class="pmp-tabs">
-                    <button class="pmp-tab active" data-tab="same">同名对比</button>
-                    <button class="pmp-tab" data-tab="dup">内容重复</button>
+                <div class="pmp-title-wrap">
+                    <h3>Persona Manager</h3>
+                    <span class="pmp-count"></span>
                 </div>
-                <button class="pmp-close menu_button">×</button>
+                <div class="pmp-tabs">
+                    <button class="pmp-tab active" type="button" data-tab="same">同名对比</button>
+                    <button class="pmp-tab" type="button" data-tab="dup">内容重复</button>
+                </div>
+                <button class="pmp-close menu_button" type="button" aria-label="关闭">×</button>
             </div>
             <div class="pmp-body">
                 <div class="pmp-panel" id="pmp-same"></div>
@@ -207,74 +337,131 @@ function openManagerPopup() {
     `);
 
     $('body').append($popup);
-    renderSameNamePanel();
-    renderDupPanel();
+    $popup.find('.pmp-count').text(`共 ${getAllPersonas().length} 个 Persona`);
 
-    $popup.find('.pmp-close').on('click', () => $popup.remove());
-    $popup.find('.pmp-tab').on('click', function () {
+    renderSameNamePanel($popup);
+    renderDupPanel($popup);
+
+    $popup.on('click', '.pmp-close', () => $popup.remove());
+
+    $popup.on('click', '.pmp-tab', function () {
+        const tab = $(this).data('tab');
+
         $popup.find('.pmp-tab').removeClass('active');
         $(this).addClass('active');
+
         $popup.find('.pmp-panel').hide();
-        $(`#pmp-${$(this).data('tab')}`).show();
+        $popup.find(`#pmp-${tab}`).show();
+    });
+
+    $popup.on('click', (event) => {
+        if (event.target === $popup[0]) {
+            $popup.remove();
+        }
     });
 }
 
-function renderSameNamePanel() {
-    const groups = groupByName();
-    const $panel = $('#pmp-same').empty();
+function renderPersonaMiniCard(persona, withCheckbox = false) {
+    return `
+        <div class="pmp-card" data-id="${escapeAttribute(persona.avatarId)}">
+            <img src="${escapeAttribute(persona.thumb)}" class="pmp-avatar" alt="">
+            <div class="pmp-info">
+                <div class="pmp-name">${escapeHtml(persona.displayName)}</div>
+                <div class="pmp-id">${escapeHtml(persona.avatarId)}</div>
+                <div class="pmp-title">${escapeHtml(persona.title || '（无标题）')}</div>
+                ${persona.alias ? `<div class="pmp-alias-readonly">二次别名：${escapeHtml(persona.alias)}</div>` : ''}
+            </div>
+            ${withCheckbox ? `
+                <label class="checkbox_label pmp-checkbox-label">
+                    <input type="checkbox" class="pmp-select">
+                    <span>对比</span>
+                </label>
+            ` : ''}
+        </div>
+    `;
+}
 
-    if (groups.length === 0) {
-        $panel.html('<p class="text_muted">没有发现同名 Persona。</p>');
+function renderSameNamePanel($popup) {
+    const $panel = $popup.find('#pmp-same').empty();
+    const groups = groupByName();
+
+    if (!groups.length) {
+        $panel.html(`
+            <div class="pmp-empty">
+                <i class="fa-solid fa-circle-check"></i>
+                <div>没有发现同名 Persona</div>
+            </div>
+        `);
         return;
     }
 
-    groups.forEach(([name, list]) => {
+    groups.forEach(([name, list], index) => {
+        const groupId = `pmp-group-${index}`;
+
         const $group = $(`
-            <div class="pmp-group">
-                <div class="pmp-group-title">同名：<b>${escapeHtml(name)}</b>（${list.length} 个）</div>
+            <section class="pmp-group" id="${groupId}">
+                <div class="pmp-group-title">
+                    <span>同名：<b>${escapeHtml(name)}</b></span>
+                    <span class="pmp-group-count">${list.length} 个</span>
+                </div>
                 <div class="pmp-cards"></div>
+                <div class="pmp-group-actions">
+                    <button type="button" class="menu_button pmp-do-compare">对比选中</button>
+                    <button type="button" class="menu_button pmp-select-all">全选</button>
+                </div>
                 <div class="pmp-compare-area" style="display:none;"></div>
-            </div>
+            </section>
         `);
 
-        list.forEach(p => {
-            $group.find('.pmp-cards').append(`
-                <div class="pmp-card" data-id="${p.avatarId}">
-                    <img src="${p.thumb}" class="pmp-avatar">
-                    <div class="pmp-info">
-                        <div class="pmp-name">${escapeHtml(p.displayName)}</div>
-                        <div class="pmp-id text_muted">${p.avatarId}</div>
-                        <div class="pmp-title">${escapeHtml(p.title || '（无标题）')}</div>
-                    </div>
-                    <label class="checkbox_label">
-                        <input type="checkbox" class="pmp-select"> 对比
-                    </label>
-                </div>
-            `);
+        list.forEach((persona) => {
+            $group.find('.pmp-cards').append(renderPersonaMiniCard(persona, true));
         });
 
-        const $btn = $(`<button class="menu_button pmp-do-compare">对比选中</button>`);
-        $group.append($btn);
+        $group.on('click', '.pmp-select-all', function () {
+            const $checks = $group.find('.pmp-select');
+            const checked = $checks.filter(':checked').length !== $checks.length;
+            $checks.prop('checked', checked);
+        });
 
-        $btn.on('click', () => {
+        $group.on('click', '.pmp-do-compare', function () {
             const selected = [];
+
             $group.find('.pmp-select:checked').each(function () {
-                const id = $(this).closest('.pmp-card').data('id');
-                selected.push(list.find(x => x.avatarId === id));
+                const id = String($(this).closest('.pmp-card').data('id'));
+                const persona = list.find((item) => item.avatarId === id);
+                if (persona) selected.push(persona);
             });
+
             if (selected.length < 2) {
                 toastr.warning('请至少选择两个 Persona 进行对比');
                 return;
             }
-            const a = selected[0], b = selected[1];
-            $group.find('.pmp-compare-area').html(`
+
+            const [a, b] = selected;
+            const $area = $group.find('.pmp-compare-area');
+
+            $area.html(`
                 <div class="pmp-diff-header">
-                    <div><b>${escapeHtml(a.displayName)}</b> (${a.avatarId})</div>
-                    <div><b>${escapeHtml(b.displayName)}</b> (${b.avatarId})</div>
+                    <div>
+                        <span class="pmp-diff-label">A</span>
+                        <b>${escapeHtml(a.displayName)}</b>
+                        <span class="pmp-id">${escapeHtml(a.avatarId)}</span>
+                    </div>
+                    <div>
+                        <span class="pmp-diff-label">B</span>
+                        <b>${escapeHtml(b.displayName)}</b>
+                        <span class="pmp-id">${escapeHtml(b.avatarId)}</span>
+                    </div>
                 </div>
                 <div class="pmp-diff-body">
-                    <div class="pmp-diff-col"><h4>描述</h4>${renderDiff(a.description, b.description)}</div>
-                    <div class="pmp-diff-col"><h4>标题</h4>${renderDiff(a.title, b.title)}</div>
+                    <div class="pmp-diff-col">
+                        <h4>描述</h4>
+                        ${renderDiff(a.description, b.description)}
+                    </div>
+                    <div class="pmp-diff-col">
+                        <h4>标题</h4>
+                        ${renderDiff(a.title, b.title)}
+                    </div>
                 </div>
             `).show();
         });
@@ -283,87 +470,129 @@ function renderSameNamePanel() {
     });
 }
 
-function renderDupPanel() {
-    const dups = findContentDuplicates();
-    const $panel = $('#pmp-dup').empty();
+function renderDupPanel($popup) {
+    const $panel = $popup.find('#pmp-dup').empty();
+    const duplicates = findContentDuplicates();
 
-    if (dups.length === 0) {
-        $panel.html('<p class="text_muted">没有发现内容完全相同的 Persona。</p>');
+    if (!duplicates.length) {
+        $panel.html(`
+            <div class="pmp-empty">
+                <i class="fa-solid fa-circle-check"></i>
+                <div>没有发现描述 + 标题完全相同的 Persona</div>
+            </div>
+        `);
         return;
     }
 
-    dups.forEach((list, idx) => {
+    duplicates.forEach((list, index) => {
         const $group = $(`
-            <div class="pmp-group">
-                <div class="pmp-group-title">重复组 #${idx + 1}（${list.length} 个）</div>
-                <div class="pmp-cards"></div>
-            </div>
-        `);
-        list.forEach(p => {
-            $group.find('.pmp-cards').append(`
-                <div class="pmp-card">
-                    <img src="${p.thumb}" class="pmp-avatar">
-                    <div class="pmp-info">
-                        <div class="pmp-name">${escapeHtml(p.displayName)}</div>
-                        <div class="pmp-id text_muted">${p.avatarId}</div>
-                        <div class="pmp-title">${escapeHtml(p.title || '（无标题）')}</div>
-                    </div>
+            <section class="pmp-group">
+                <div class="pmp-group-title">
+                    <span>重复组 #${index + 1}</span>
+                    <span class="pmp-group-count">${list.length} 个</span>
                 </div>
-            `);
+                <div class="pmp-cards"></div>
+            </section>
+        `);
+
+        list.forEach((persona) => {
+            $group.find('.pmp-cards').append(renderPersonaMiniCard(persona, false));
         });
+
         $panel.append($group);
     });
 }
 
-/** 在扩展设置或 Persona 面板加「打开对比工具」按钮 */
-function injectOpenButton() {
-    // 尝试挂到 Persona Management 顶部
-    const $btn = $(`
-        <button id="pmp-open-btn" class="menu_button" style="margin: 6px 0; width: 100%;">
-            <i class="fa-solid fa-code-compare"></i> Persona 对比 / 重复检测
-        </button>
-    `);
+function scheduleInject() {
+    clearTimeout(injectTimer);
 
-    // 优先挂到 persona 相关区域
-    const $targets = [
-        '#persona-management-button',
-        '#user_avatar_block',
-        '.persona_management',
-        '#rm_extensions_block',
-        '#extensions_settings'
-    ];
+    injectTimer = setTimeout(() => {
+        injectToolbar();
+        injectAliasIntoNativeList();
+    }, 80);
+}
 
-    for (const sel of $targets) {
-        const $t = $(sel).first();
-        if ($t.length) {
-            $t.before($btn);
-            break;
-        }
+function watchPersonaList() {
+    const target = document.getElementById('user_avatar_block');
+
+    if (!target) return false;
+
+    if (personaObserver) {
+        personaObserver.disconnect();
     }
 
-    $(document).on('click', '#pmp-open-btn', openManagerPopup);
+    personaObserver = new MutationObserver((mutations) => {
+        // 只在原生 Persona 卡片被添加/删除时处理，避免自己插入输入框造成无意义循环。
+        const relevant = mutations.some((mutation) =>
+            [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
+                if (!(node instanceof Element)) return false;
+                return node.matches('.avatar-container') ||
+                    node.querySelector?.('.avatar-container');
+            })
+        );
+
+        if (relevant) {
+            scheduleInject();
+        }
+    });
+
+    personaObserver.observe(target, {
+        childList: true,
+        subtree: true,
+    });
+
+    return true;
+}
+
+function waitForPersonaList() {
+    const tryInit = () => {
+        if (!document.getElementById('user_avatar_block')) {
+            setTimeout(tryInit, 300);
+            return;
+        }
+
+        scheduleInject();
+        watchPersonaList();
+    };
+
+    tryInit();
+}
+
+function bindPersonaEvents() {
+    if (!eventSource || !event_types) return;
+
+    const events = [
+        event_types.PERSONA_CHANGED,
+        event_types.PERSONA_CREATED,
+        event_types.PERSONA_DELETED,
+    ].filter(Boolean);
+
+    for (const eventName of events) {
+        eventSource.on(eventName, () => {
+            setTimeout(() => {
+                pmpData = loadData();
+                scheduleInject();
+            }, 150);
+        });
+    }
+}
+
+async function init() {
+    try {
+        pmpData = loadData();
+
+        bindEvents();
+        bindPersonaEvents();
+        waitForPersonaList();
+
+        console.log(`[${EXT}] loaded`);
+        console.log(`[${EXT}] accountStorage:`, !!getAccountStorage());
+    } catch (error) {
+        console.error(`[${EXT}] 初始化失败`, error);
+        toastr.error(`Persona Manager 初始化失败：${error?.message || error}`);
+    }
 }
 
 jQuery(async () => {
-    pmpData = loadData();
-    bindNativeAliasSave();
-    injectOpenButton();
-
-    // 等 Persona 列表出现后再注入 + 监听
-    const tryInject = () => {
-        if ($('#user_avatar_block').length) {
-            injectAliasIntoNativeList();
-            watchPersonaList();
-        } else {
-            setTimeout(tryInject, 500);
-        }
-    };
-    tryInject();
-
-    // 列表刷新时也尝试注入
-    eventSource.on(event_types.PERSONA_CHANGED, () => {
-        setTimeout(injectAliasIntoNativeList, 200);
-    });
-
-    console.log('[Persona Manager Pro] loaded (alias only in Persona UI, accountStorage)');
+    await init();
 });
