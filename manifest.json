@@ -1,12 +1,12 @@
 {
   "display_name": "Persona Manager",
-  "loading_order": 60,
+  "loading_order": 100,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "homePage": "https://github.com/xingx121/persona-manager",
-  "auto_update": true
+  "description": "SillyTavern Persona 管理工具：同名分组、完全重复检测、高相似提示与 Persona 对比。"
 }
