@@ -1,12 +1,12 @@
 {
-  "display_name": "Persona Manager Pro",
+  "display_name": "Persona Manager",
   "loading_order": 60,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "YourName",
+  "author": "xingx121",
   "version": "1.1.0",
-  "homePage": "https://github.com/YourName/persona-manager-pro",
+  "homePage": "https://github.com/xingx121/persona-manager",
   "auto_update": true
 }
