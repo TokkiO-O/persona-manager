@@ -5,6 +5,6 @@
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "version": "1.7.1",
-  "description": "SillyTavern Persona 管理工具：快速入口、同名分组、完全重复检测、高相似提示与多 Persona 无序对比。"
+  "version": "1.8.0",
+  "description": "SillyTavern Persona 管理工具：稳定入口、Persona 管理、同名/重复/相似检测与多 Persona 对比。"
 }

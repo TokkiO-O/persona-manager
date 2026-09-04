@@ -233,3 +233,27 @@ body.pmp14-open { overflow: hidden !important; }
 #pmp17-update-box .pmp17-update-text{flex:1;line-height:1.35}
 #pmp17-update-box.available{border-width:1px}
 #pmp17-update-box.error{opacity:.85}
+
+/* v1.8 startup/update UI */
+#persona-manager-entry.pmp18-entry {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+}
+#persona-manager-entry.pmp18-entry small {
+    margin-left: auto;
+    opacity: .65;
+}
+.pmp18-update-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+}
+.pmp18-update-status {
+    opacity: .8;
+    font-size: .92em;
+}
+.pmp18-update-btn {
+    flex: 0 0 auto;
+}

@@ -1,4 +1,4 @@
-# Persona Manager v1.6.0
+# Persona Manager v1.8.0
 
 SillyTavern Persona 管理扩展：管理、搜索、同名/重复检测、全文匹配对比、多 Persona 对比与原 Persona 编辑同步。
 
@@ -61,3 +61,10 @@ v1.6.0
 
 ## v1.7.0
 多 Persona 对比、可切换基准、完整描述展示、无序内容匹配、文字级差异高亮、比较界面编辑与重新比较。不会修改其他扩展的管理器显示。
+
+
+## v1.8.0
+- 恢复并固定基于“全局设置”可见文本 + MutationObserver 的稳定启动入口。
+- 不修改 SillyTavern 扩展管理器，也不干扰其他扩展。
+- 接入 SillyTavern 原生 `/api/extensions/version` 与 `/api/extensions/update` 更新接口。
+- 更新成功后自动刷新页面，使新版本代码立即生效。
