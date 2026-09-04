@@ -1,4 +1,4 @@
-/* Persona Manager v1.8.0 */
+/* Persona Manager v1.8.3 */
 
 /* Entry */
 .pmp18-entry {
@@ -284,10 +284,43 @@ body.pmp18-open { overflow: hidden !important; }
 .pmp18-selection-bar span { font-size: 11px; opacity: .52; }
 
 /* Settings */
-.pmp18-settings { max-width: 520px; }
-.pmp18-settings-row { display: flex; flex-direction: column; gap: 8px; }
+.pmp18-settings { max-width: 620px; }
+.pmp18-settings-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .pmp18-settings-row label { font-weight: 600; }
 .pmp18-settings-row input[type="range"] { width: 100%; accent-color: #ff8a62; }
+.pmp18-settings-row .pmp18-version-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.pmp18-version-badge {
+    display: inline-block;
+    background: #ff8a62;
+    color: #fff;
+    border-radius: 99px;
+    padding: 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 20px;
+}
+.pmp18-version-new {
+    background: #e74c3c;
+    animation: pmp18-pulse 1.5s ease-in-out infinite;
+}
+@keyframes pmp18-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.95); }
+}
+.pmp18-version-btn {
+    background: transparent;
+    border: 1px solid rgba(127,127,127,.2);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.pmp18-version-btn:hover { background: rgba(127,127,127,.08); }
 
 /* ========== Compare workspace ========== */
 .pmp18-compare-workspace {
@@ -645,6 +678,42 @@ mark.pmp18-add {
     opacity: .5;
 }
 
+/* Full edit overlay (name + desc) */
+.pmp18-full-editor .pmp18-editor-ta { min-height: 180px; }
+.pmp18-full-editor .pmp18-editor-input {
+    margin: 8px 16px 4px;
+    padding: 8px 12px;
+    border: 1px solid rgba(127,127,127,.2);
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    background: rgba(127,127,127,.06);
+    color: inherit;
+}
+.pmp18-full-editor .pmp18-editor-input:focus { border-color: #ff8a62; outline: none; }
+
+/* Update modal */
+.pmp18-update-modal .pmp18-editor {
+    max-width: 580px;
+}
+.pmp18-update-modal .pmp18-editor-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    max-height: 50vh;
+}
+.pmp18-update-modal .pmp18-release-notes {
+    background: rgba(127,127,127,.04);
+    border-radius: 8px;
+    padding: 12px;
+    white-space: pre-wrap;
+    font-size: 13px;
+    line-height: 1.6;
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid rgba(127,127,127,.08);
+}
+
+/* Responsive */
 @media (max-width: 1000px) {
     .pmp18-window { inset: 1vh 1vw; }
     .pmp18-card-grid, .pmp18-group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
