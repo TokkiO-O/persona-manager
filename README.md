@@ -1,59 +1,42 @@
-# Persona Manager v1.8.3
+# Persona Manager v1.8.6
 
-SillyTavern 第三方扩展：Persona 管理、同名/完全重复/高相似检测、多 Persona 横滑对比（基准固定）、无序文本匹配、对比内编辑写回、自适应高亮、更新后自动刷新。
+SillyTavern 第三方扩展：Persona 列表管理、同名/重复/相似检测、多列横滑对比、列表内编辑写回、更新检查。
 
-## 新增功能 (v1.8.3)
+## v1.8.6（重要修复）
 
-- **版本更新检测**：在设置面板中显示当前版本，自动检查 GitHub 最新版本，有新版本时显示“NEW”角标，点击可查看更新日志并跳转下载。
-- **允许同名 Persona 参与相似度检测**：新增开关，开启后即使名称相同，也会基于描述内容进行相似度比对，解决修改后未出现在高度相似列表的问题。
-- **列表页直接编辑 Persona**：在 Persona 卡片上增加编辑按钮，可直接修改名称和描述，无需进入对比模式。
-- **差异检测敏感度调节**：新增滑块，可调整段落匹配的敏感度（10%~60%），更精细控制“修订高亮”和“并排高亮”的差异显示。
-
-## 功能摘要
-
-- 多选 ≥2 全部参与对比，可随时切换基准
-- 无序内容匹配 + 文字级高亮
-- 对比内编辑 → 写回原 Persona → 立即刷新对比
-- 相似阈值可调、编辑二次确认
-- 官方 `hooks.update` 更新后自动刷新
-- 同名检测、完全重复检测、高度相似检测（支持同名开关）
-- 差异检测敏感度调节
+- **入口**：删除 1.8.5 中重复的入口函数（曾覆盖正确挂载逻辑导致按钮消失）；优先挂到 `#persona-management-block` / 用户设定。
+- **写回**：正确处理 `persona_descriptions` 的 string / object 结构，保留 position 等字段，避免原生界面描述变空白。
+- **性能**：去掉全局 click 捕获与无限轮询；观察者挂载成功后断开，减轻换人设卡顿。
+- 列表可直接编辑**名称 + 描述**；同名可纳入高度相似（设置可关）。
+- 对比：左基准固定、右横滑；字段型描述按 key 分块 + 块内字词高亮。
 
 ## 安装
 
-扩展管理器粘贴仓库地址，或手动放到：
+最终目录必须是：
 
-`SillyTavern/public/scripts/extensions/third-party/persona-manager/`
+```
+SillyTavern/public/scripts/extensions/third-party/persona-manager/
+  ├── index.js
+  ├── style.css
+  ├── manifest.json
+  └── README.md
+```
 
-目录内需直接包含 `index.js`、`style.css`、`manifest.json`、`README.md`。
+**不要**出现 `persona-manager/persona-manager/` 双层目录。
+
+扩展管理器安装后建议 **Ctrl+F5**。若面板无按钮，可用右下角浮动入口或控制台：
+
+```js
+openPersonaManager()
+```
 
 ## 使用
 
-1. 打开「用户设定 / Persona 管理」面板，应能看到 Persona Manager 按钮；否则用右下角浮动按钮或控制台 `openPersonaManager()`。
-2. 勾选多个 Persona → 开始对比。
-3. 左侧为基准（可切换），右侧左右滑动查看其他对比列；每列上下滚动阅读全文。
-4. 在设置中可调整相似阈值、差异敏感度、同名参与相似检测等。
+1. 打开「用户设定 / Persona 管理」→ Persona Manager。
+2. 列表勾选 ≥2 个 → 开始对比；可切换基准、只看差异。
+3. 卡片上「编辑」可改名称与描述并写回。
+4. 设置页可调相似阈值、同名是否参与相似、检查更新。
 
 ## 版本
 
-v1.8.3
-
-## v1.8.5 更新
-
-### 修复
-- 修复编辑 Persona 描述后覆盖原生 `persona_descriptions` 对象、导致 SillyTavern 原 Persona 界面描述为空的问题。
-- 编辑时只更新 `description`，保留 Persona 原有的 position、depth、role、lorebook、title 等字段。
-
-### 性能优化
-- 移除 Persona Manager 常驻的全页面轮询/扫描思路。
-- Persona Manager 未打开时不进行 Persona 数据对比刷新。
-- 管理器打开后才响应 Persona 生命周期事件并合并刷新。
-- 使用 `requestAnimationFrame` 合并连续刷新，减少切换 Persona 时的卡顿。
-
-### 更新中心
-- 支持在 Persona Manager 设置区域提示新版本。
-- 有更新时显示 `NEW` 小角标。
-- 点击更新后才弹出版本更新确认窗口。
-- API 检查失败不再显示“无法获取详细日志 / 前往 Release / 前往下载”提示。
-- 更新成功后自动刷新页面。
-- 从 SillyTavern“管理扩展”更新后通过 `update` hook 自动刷新。
+v1.8.6
