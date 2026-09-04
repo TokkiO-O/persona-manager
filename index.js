@@ -14,6 +14,8 @@
  * - NEW: Allow same-name personas in similarity detection (toggle)
  * - NEW: Full edit (name+description) from card list
  * - NEW: Adjustable diff sensitivity (soft threshold)
+ * - FIX: Save delay and refresh to prevent description loss and lag
+ * - FIX: Update check fallback when GitHub API fails (raw manifest)
  */
 
 import { power_user } from '../../../power-user.js';
@@ -31,7 +33,7 @@ const defaultSettings = {
     compareLayout: 'side', // 'side' | 'revision'
     showDiffOnly: false,
     allowSameNameSimilarity: false,
-    diffSoftThreshold: 0.35, // for unorderedDiff soft matching
+    diffSoftThreshold: 0.35,
 };
 
 const state = {
@@ -152,7 +154,6 @@ function getSimilarPairs(personas, threshold = state.settings.similarityThreshol
         for (let j = i + 1; j < personas.length; j++) {
             const a = personas[i];
             const b = personas[j];
-            // Skip same name unless allowed
             if (a.nameKey === b.nameKey && !allowSame) continue;
             if (!a.descriptionKey || !b.descriptionKey) continue;
             const score = similarity(a.description, b.description);
@@ -260,7 +261,7 @@ function renderSimilarView(personas) {
         </section>`).join('')}</div>`;
 }
 
-/* ---------- Diff engine: units + unordered matching ---------- */
+/* ---------- Diff engine ---------- */
 
 function splitUnits(text) {
     const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
@@ -274,17 +275,13 @@ function unitSimilarity(a, b) {
     return similarity(a, b);
 }
 
-/**
- * Unordered best matching with adjustable soft threshold
- */
 function unorderedDiff(aText, bText) {
     const aUnits = splitUnits(aText);
     const bUnits = splitUnits(bText);
     const usedB = new Set();
     const pairs = [];
-    const soft = state.settings.diffSoftThreshold; // configurable
+    const soft = state.settings.diffSoftThreshold;
 
-    // Pass 1: exact
     for (let i = 0; i < aUnits.length; i++) {
         const na = normalizeText(aUnits[i]);
         let matched = false;
@@ -300,7 +297,6 @@ function unorderedDiff(aText, bText) {
         if (!matched) pairs.push({ type: 'pending', a: aUnits[i], b: null, ai: i, bj: -1 });
     }
 
-    // Pass 2: best similarity for pending
     for (const p of pairs) {
         if (p.type !== 'pending') continue;
         let bestJ = -1;
@@ -324,7 +320,6 @@ function unorderedDiff(aText, bText) {
         }
     }
 
-    // Remaining B units = adds
     for (let j = 0; j < bUnits.length; j++) {
         if (usedB.has(j)) continue;
         pairs.push({ type: 'add', a: '', b: bUnits[j], ai: -1, bj: j });
@@ -442,7 +437,6 @@ function renderDiffBlock(row, layout, showDiffOnly) {
         </div>`;
     }
 
-    // Side-by-side
     if (row.type === 'same') {
         return `<div class="pmp18-side-row same">
             <div class="pmp18-side-cell">${escapeHtml(row.a)}</div>
@@ -595,9 +589,41 @@ function tabButton(key, label, icon, count) {
 
 /* ---------- Version update ---------- */
 async function checkForUpdates() {
+    // 备用方案：直接从 raw 读取 manifest.json 获取版本
+    async function fetchVersionFromManifest() {
+        const resp = await fetch('https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json');
+        if (!resp.ok) throw new Error('Raw manifest fetch failed');
+        const data = await resp.json();
+        return data.version || '0.0.0';
+    }
+
     try {
-        const response = await fetch('https://api.github.com/repos/xingx121/persona-manager/releases/latest');
-        if (!response.ok) throw new Error('Network response was not ok');
+        // 主方案：GitHub API（必须带 User-Agent）
+        const response = await fetch('https://api.github.com/repos/xingx121/persona-manager/releases/latest', {
+            headers: {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': `Persona-Manager-Extension/${VERSION}`
+            }
+        });
+
+        if (!response.ok) {
+            // API 失败（403 速率限制 / 404），自动切换到备用方案
+            if (response.status === 403 || response.status === 404) {
+                console.warn('[Persona Manager] API failed, falling back to raw manifest...');
+                const latestVersion = await fetchVersionFromManifest();
+                const hasUpdate = latestVersion !== VERSION;
+                const updateInfo = {
+                    latestVersion,
+                    hasUpdate,
+                    releaseNotes: '由于 GitHub API 限制，无法获取详细更新日志。请点击下方按钮前往 Release 页面查看。',
+                    checkedAt: Date.now()
+                };
+                localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
+                return updateInfo;
+            }
+            throw new Error(`HTTP ${response.status}`);
+        }
+
         const data = await response.json();
         const latestVersion = data.tag_name.replace(/^v/, '');
         const hasUpdate = latestVersion !== VERSION;
@@ -609,9 +635,25 @@ async function checkForUpdates() {
         };
         localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
         return updateInfo;
+
     } catch (e) {
-        console.warn('[Persona Manager] 检查更新失败:', e);
-        return null;
+        // 网络错误 / CORS 拦截，尝试备用方案
+        try {
+            console.warn('[Persona Manager] Network error, trying raw manifest fallback...', e);
+            const latestVersion = await fetchVersionFromManifest();
+            const hasUpdate = latestVersion !== VERSION;
+            const updateInfo = {
+                latestVersion,
+                hasUpdate,
+                releaseNotes: '无法连接 GitHub API（可能网络限制或 CORS），请手动前往 Release 页面查看。',
+                checkedAt: Date.now()
+            };
+            localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
+            return updateInfo;
+        } catch (_) {
+            console.warn('[Persona Manager] 检查更新彻底失败:', e);
+            return null;
+        }
     }
 }
 
@@ -620,7 +662,6 @@ function getUpdateStatus() {
         const raw = localStorage.getItem(UPDATE_STORAGE_KEY);
         if (!raw) return null;
         const data = JSON.parse(raw);
-        // Check if stale (older than 1 hour)
         if (Date.now() - data.checkedAt > 3600000) return { ...data, stale: true };
         return data;
     } catch { return null; }
@@ -655,6 +696,34 @@ function showUpdateModal(updateInfo) {
     document.body.appendChild(overlay);
 }
 
+function showNetworkErrorModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'pmp18-editor-overlay pmp18-update-modal';
+    overlay.innerHTML = `
+        <div class="pmp18-editor">
+            <div class="pmp18-editor-head">
+                <strong>⚠️ 网络错误</strong>
+                <button type="button" class="pmp18-close pmp18-editor-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="pmp18-editor-body">
+                <p>无法连接 GitHub 服务器，可能是网络限制或跨域问题。</p>
+                <p style="font-size:13px;opacity:.7;">请手动访问以下地址查看最新版本：</p>
+                <div style="background:rgba(127,127,127,.08);padding:8px;border-radius:6px;word-break:break-all;font-size:13px;">
+                    https://github.com/xingx121/persona-manager/releases
+                </div>
+            </div>
+            <div class="pmp18-editor-actions">
+                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">关闭</button>
+                <a href="https://github.com/xingx121/persona-manager/releases" target="_blank" rel="noopener noreferrer" class="pmp18-primary-btn" style="text-decoration:none;">前往 GitHub</a>
+            </div>
+        </div>`;
+    const close = () => overlay.remove();
+    overlay.querySelector('.pmp18-editor-close').onclick = close;
+    overlay.querySelector('.pmp18-editor-cancel').onclick = close;
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+}
+
 /* ---------- Edit functions ---------- */
 function persistPersonaDescription(id, description) {
     if (!power_user) return false;
@@ -680,14 +749,12 @@ function persistPersonaDescription(id, description) {
 
 function persistPersonaFull(id, name, description) {
     if (!power_user) return false;
-    // Update name
     if (power_user.personas) {
         power_user.personas[id] = name;
     }
-    // Update description
     if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
     power_user.persona_descriptions[id] = description;
-    // Save
+
     try {
         if (typeof window.saveSettingsDebounced === 'function') {
             window.saveSettingsDebounced();
@@ -771,7 +838,7 @@ function openFullEditor(id) {
             <textarea class="pmp18-editor-ta" rows="12" spellcheck="false">${escapeHtml(p.description)}</textarea>
             <div class="pmp18-editor-actions">
                 <button type="button" class="pmp18-small-btn pmp18-editor-cancel">取消</button>
-                <button type="button" class="pmp18-primary-btn pmp18-editor-save">保存</button>
+                <button type="button" class="pmp18-primary-btn pmp18-editor-save" id="pmp18-full-save-btn">保存</button>
             </div>
             <p class="pmp18-editor-note">修改后立即生效，刷新当前列表。</p>
         </div>`;
@@ -781,7 +848,12 @@ function openFullEditor(id) {
     overlay.querySelector('.pmp18-editor-cancel').onclick = close;
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
-    overlay.querySelector('.pmp18-editor-save').onclick = () => {
+    const saveBtn = overlay.querySelector('#pmp18-full-save-btn');
+    saveBtn.onclick = () => {
+        if (saveBtn.disabled) return;
+        saveBtn.disabled = true;
+        saveBtn.textContent = '保存中...';
+
         const newName = overlay.querySelector('.pmp18-editor-input').value.trim() || p.id;
         const newDesc = overlay.querySelector('.pmp18-editor-ta').value;
         if (newName === p.name && newDesc === p.description) {
@@ -789,11 +861,31 @@ function openFullEditor(id) {
             return;
         }
         const ok = window.confirm('确认修改？将更新名称和描述。');
-        if (!ok) return;
-        persistPersonaFull(id, newName, newDesc);
+        if (!ok) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = '保存';
+            return;
+        }
+
+        const success = persistPersonaFull(id, newName, newDesc);
+        if (!success) {
+            alert('保存失败，请检查控制台错误。');
+            saveBtn.disabled = false;
+            saveBtn.textContent = '保存';
+            return;
+        }
+
         close();
-        if (typeof toastr !== 'undefined') toastr.success('Persona 已更新');
-        renderManager();
+
+        setTimeout(() => {
+            renderManager();
+            try {
+                document.dispatchEvent(new CustomEvent('settingsUpdated'));
+            } catch (_) {}
+            if (typeof toastr !== 'undefined') {
+                toastr.success('Persona 已更新');
+            }
+        }, 300);
     };
 
     document.body.appendChild(overlay);
@@ -836,7 +928,7 @@ function renderSettingsPanel() {
             <div class="pmp18-settings-row" style="border-top:1px solid rgba(127,127,127,.12);padding-top:12px;">
                 <label>差异检测敏感度 <b id="pmp18-soft-val">${soft}%</b></label>
                 <input type="range" id="pmp18-soft-threshold" min="10" max="60" step="5" value="${soft}" data-action="soft-threshold">
-                <span class="pmp18-muted">控制段落匹配的宽松程度，值越低差异越容易被标注（推荐 30% ~ 45%）</span>
+                <span class="pmp18-muted" style="font-size:12px;">控制段落匹配的宽松程度，值越低差异越容易被标注（推荐 30% ~ 45%）</span>
             </div>
         </div>`;
 }
@@ -998,7 +1090,6 @@ function ensureRoot() {
             return;
         }
         if (action === 'check-update') {
-            // Force check and show modal
             const btn = target;
             btn.disabled = true;
             btn.textContent = '检查中...';
@@ -1008,11 +1099,12 @@ function ensureRoot() {
                 if (info) {
                     showUpdateModal(info);
                 } else {
-                    if (typeof toastr !== 'undefined') toastr.warning('无法获取更新信息，请检查网络。');
+                    showNetworkErrorModal();
                 }
             }).catch(() => {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fa-solid fa-rotate"></i> 检查更新';
+                if (typeof toastr !== 'undefined') toastr.error('检查更新失败');
             });
             return;
         }
@@ -1075,7 +1167,6 @@ function openManager(tab = 'all') {
     root.hidden = false;
     document.body.classList.add('pmp18-open');
     renderManager();
-    // Background check for updates once per session
     if (!window.__pmp18UpdateChecked) {
         window.__pmp18UpdateChecked = true;
         checkForUpdates().then(info => {
@@ -1260,7 +1351,6 @@ async function init() {
     ensureRoot();
     installKeyboardHandler();
     installEntryObserver();
-    // Pre-check updates silently
     checkForUpdates().catch(() => {});
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
