@@ -1,41 +1,36 @@
-# Persona Manager v1.4.0
+# Persona Manager v1.5.0
 
-SillyTavern 第三方 Persona 管理工具。
+SillyTavern Persona 管理扩展。
 
-## v1.4.0 更新
+## 本版重点
 
-- **更快的入口加载**：扩展启动后立即注册，并用一次性 MutationObserver 等待原生「全局设置」出现；找到后立即插入并停止监听。
-- **入口位置固定**：Persona Manager 位于 Persona 设置右侧原生「全局设置」标题上方，不修改 Persona 卡片。
-- **完整对比工作区**：开始对比后切换到占满管理器的双栏工作区，不再把对比内容塞在页面底部。
-- **自适应差异视觉**：
-  - 90% 以上：降低共同内容，重点突出差异。
-  - 70%–90%：平衡共同点与差异。
-  - 40%–70%：平衡阅读。
-  - 40% 以下：降低差异视觉，优先帮助寻找共同点。
-- **三级差异定位**：行级、词/字符级高亮；修改、A 独有、B 独有使用不同视觉标记。
-- **差异摘要**：显示描述相似度、共同内容比例、修改行、A/B 独有行。
-- **同步滚动**：左右 Persona 描述同步滚动；中间差异轨道可以跳到对应行。
-- **真实 Persona 描述兼容**：读取新版 `persona_descriptions[id].description`，同时兼容字符串形式，避免 `[object Object]`。
-- **不修改原数据**：插件只读取 Persona 数据，不写入名称、描述或别名。
+- 启动时立即创建入口，不等待 Persona 数据加载；只在“全局设置”出现后把入口挂到其上方。
+- 点击 Manager 后才读取 Persona 数据。
+- 正确兼容 `persona_descriptions[id].description`。
+- 多选 Persona 后可进行 2 个或多个 Persona 对比。
+- 对比采用全文分段扫描与相似度匹配，不依赖原始前后顺序。
+- 相同/差异/独有内容分类。
+- 点击匹配项可展开原 Persona 内容并编辑。
+- 保存后直接写回 SillyTavern Persona 描述，并重新计算对比。
+- 选择框固定在卡片右上角，不覆盖头像。
+- 对比工作区全屏显示。
 
-## 功能
+## 编辑同步
 
-- 全部 Persona
-- 同名 Persona 分组
-- 完全重复检测：名称 + 描述完全一致
-- 高度相似提示：本地文本相似度算法，不调用 AI
-- 搜索名称与描述
-- 多选 Persona 并进入对比工作区
-- 两个 Persona 左右同步对比
+Manager 不保存独立的 Persona 描述副本，而是直接读取和修改 SillyTavern 的 Persona 数据。保存后会调用设置保存接口；重新打开 Manager 会读取最新内容。
+
+## 注意
+
+不同 SillyTavern 版本的 Persona 内部数据结构可能变化。若原生 Persona 编辑器有额外的保存逻辑，建议保存后重新打开 Manager 验证。
 
 ## 安装
 
-将本目录放入 SillyTavern 的：
+将本目录放入：
 
-`public/scripts/extensions/third-party/persona-manager/`
+`data/default-user/extensions/third-party/persona-manager`
 
-然后在扩展管理中重新加载/刷新。
+然后在 SillyTavern 扩展管理中启用。
 
-## 说明
+## 版本
 
-本扩展不依赖 Extras、外部 API 或额外数据库，也不提供副名称功能。Persona 的名称和原生用户设定描述就是唯一身份信息来源。
+v1.5.0
