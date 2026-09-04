@@ -1,16 +1,15 @@
 /**
- * Persona Manager v1.4.0
+ * Persona Manager v1.6.1
  * SillyTavern third-party extension
  *
  * Native Persona data only. No aliases, no data mutation, no API/Extras.
- * v1.4: fast entry mounting, adaptive comparison workspace, diff summary,
- * synchronized scrolling, line/word/character level highlighting.
+ * v1.6.1: official update hook (auto-reload), CN/EN entry heading support.
  */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.7.1';
+const VERSION = '1.6.1';
 const ROOT_ID = 'pmp14-root';
 const BUTTON_ID = 'pmp14-entry';
 const ENTRY_MARK = 'pmp14-entry-installed';
@@ -265,112 +264,29 @@ function inlineDiff(a, b) {
     });
 }
 
-function splitCompareUnits(text) {
-    const normalized = String(text || '').replace(/\r\n?/g, '\n').trim();
-    if (!normalized) return [];
-    const lines = normalized.split('\n');
-    const units = [];
-    for (const line of lines) {
-        const value = line.trimEnd();
-        if (!value.trim()) {
-            units.push('');
-            continue;
-        }
-        // Persona 描述通常是“字段/条目”式文本。只有超长单行才进一步按句子拆分，
-        // 避免因为原始条目顺序变化而被错误地判定成删除+新增。
-        if (value.length > 140) {
-            const pieces = value.split(/(?<=[。！？.!?；;])\s+/u).filter(Boolean);
-            if (pieces.length > 1) units.push(...pieces);
-            else units.push(value);
-        } else {
-            units.push(value);
-        }
-    }
-    return units;
-}
-
-function unitSimilarity(a, b) {
-    const x = normalizeText(a);
-    const y = normalizeText(b);
-    if (!x || !y) return 0;
-    if (x === y) return 1;
-    const shorter = Math.min(x.length, y.length);
-    const longer = Math.max(x.length, y.length);
-    if (!shorter || shorter / longer < 0.12) return 0;
-    return similarity(x, y);
-}
-
-function compareUnordered(aText, bText) {
-    const aUnits = splitCompareUnits(aText);
-    const bUnits = splitCompareUnits(bText);
-    const usedB = new Set();
+function compareLines(aText, bText) {
+    const aLines = String(aText || '').replace(/\r\n?/g, '\n').split('\n');
+    const bLines = String(bText || '').replace(/\r\n?/g, '\n').split('\n');
+    const diff = lcsDiff(aLines, bLines, (a, b) => normalizeText(a) === normalizeText(b));
     const rows = [];
-
-    // 先精确匹配，完全忽略原始顺序。
-    const exactMap = new Map();
-    bUnits.forEach((unit, index) => {
-        const key = normalizeText(unit);
-        if (!exactMap.has(key)) exactMap.set(key, []);
-        exactMap.get(key).push(index);
-    });
-
-    const unmatchedA = [];
-    for (let ai = 0; ai < aUnits.length; ai++) {
-        const key = normalizeText(aUnits[ai]);
-        const candidates = exactMap.get(key) || [];
-        const bi = candidates.find(index => !usedB.has(index));
-        if (bi !== undefined) {
-            usedB.add(bi);
-            rows.push({ a: aUnits[ai], b: bUnits[bi], type: 'same', score: 1, ai, bi });
+    for (let i = 0; i < diff.length; i++) {
+        const part = diff[i];
+        if (part.type === 'same') {
+            for (let k = 0; k < part.a.length; k++) rows.push({ a: part.a[k], b: part.b[k], type: 'same' });
+        } else if (part.type === 'remove') {
+            for (const line of part.a) rows.push({ a: line, b: '', type: 'remove' });
+        } else if (part.type === 'add') {
+            for (const line of part.b) rows.push({ a: '', b: line, type: 'add' });
         } else {
-            unmatchedA.push(ai);
-        }
-    }
-
-    // 再对剩余条目做“无序最佳匹配”。这样“同一字段但内容修改”会作为修改，
-    // 而不会因为字段位置不同被判成 A 独有 / B 独有。
-    for (const ai of unmatchedA) {
-        let best = -1;
-        let bestScore = 0;
-        for (let bi = 0; bi < bUnits.length; bi++) {
-            if (usedB.has(bi)) continue;
-            const score = unitSimilarity(aUnits[ai], bUnits[bi]);
-            if (score > bestScore) {
-                bestScore = score;
-                best = bi;
+            const count = Math.max(part.a.length, part.b.length);
+            for (let k = 0; k < count; k++) {
+                const left = part.a[k] ?? '';
+                const right = part.b[k] ?? '';
+                const pieces = inlineDiff(left, right);
+                rows.push({ a: pieces.map(p => p.left).join(''), b: pieces.map(p => p.right).join(''), type: left && right ? 'replace' : (left ? 'remove' : 'add') });
             }
         }
-        if (best >= 0 && bestScore >= 0.30) {
-            usedB.add(best);
-            const left = aUnits[ai];
-            const right = bUnits[best];
-            const pieces = inlineDiff(left, right);
-            rows.push({
-                a: pieces.map(part => part.left).join(''),
-                b: pieces.map(part => part.right).join(''),
-                type: 'replace',
-                score: bestScore,
-                ai,
-                bi: best,
-            });
-        } else {
-            rows.push({ a: escapeHtml(aUnits[ai]), b: '', type: 'remove', score: 0, ai, bi: -1 });
-        }
     }
-
-    // B 中尚未匹配的内容是 B 独有。排序按 B 原始位置，便于阅读。
-    for (let bi = 0; bi < bUnits.length; bi++) {
-        if (usedB.has(bi)) continue;
-        rows.push({ a: '', b: escapeHtml(bUnits[bi]), type: 'add', score: 0, ai: -1, bi });
-    }
-
-    // 以 A 的原始顺序为主，新增项放在对应的 B 顺序区域；最重要的是匹配本身不再依赖位置。
-    rows.sort((x, y) => {
-        const xa = x.ai >= 0 ? x.ai : Number.MAX_SAFE_INTEGER;
-        const ya = y.ai >= 0 ? y.ai : Number.MAX_SAFE_INTEGER;
-        if (xa !== ya) return xa - ya;
-        return (x.bi ?? Number.MAX_SAFE_INTEGER) - (y.bi ?? Number.MAX_SAFE_INTEGER);
-    });
     return rows;
 }
 
@@ -383,274 +299,248 @@ function countChanges(rows) {
     };
 }
 
-function renderComparePair(a, b, pairIndex, totalPairs) {
+function renderCompareWorkspace(personas) {
+    const chosen = state.compareIds.map(id => personas.find(p => p.id === id)).filter(Boolean).slice(0, 2);
+    if (chosen.length < 2) return renderManagerContent(personas);
+
+    const [a, b] = chosen;
     const score = similarity(a.description, b.description);
-    const rows = compareUnordered(a.description, b.description);
+    const mode = diffMode(score);
+    const rows = compareLines(a.description, b.description);
     const counts = countChanges(rows);
     const total = Math.max(rows.length, 1);
     const commonPct = Math.round((counts.common / total) * 100);
-    const mode = diffMode(score);
 
     return `
-        <section class="pmp14-multi-pair ${mode.key}" data-compare-pair="${pairIndex}">
-            <div class="pmp14-multi-pair-head">
-                <div class="pmp14-pair-label"><strong>比较 ${pairIndex + 1}${totalPairs > 1 ? ` / ${totalPairs}` : ''}</strong><span>基准 Persona ↔ 对比 Persona</span></div>
-                <div class="pmp14-pair-score"><b>${Math.round(score * 100)}%</b><span>描述相似度</span></div>
-                <div class="pmp14-pair-metrics"><span>共同 ${commonPct}%</span><span>修改 ${counts.changed}</span><span>A 独有 ${counts.onlyA}</span><span>B 独有 ${counts.onlyB}</span></div>
+        <div class="pmp14-compare-workspace ${mode.key}">
+            <div class="pmp14-compare-topbar">
+                <button class="pmp14-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回列表</button>
+                <div class="pmp14-compare-title"><strong>Persona 对比</strong><span>${escapeHtml(mode.title)}</span></div>
+                <button class="pmp14-small-btn" data-action="swap-compare"><i class="fa-solid fa-right-left"></i> 交换</button>
             </div>
+            <div class="pmp14-compare-summary">
+                <div class="pmp14-score-block"><div class="pmp14-big-score">${Math.round(score * 100)}<small>%</small></div><div><strong>描述相似度</strong><span>${escapeHtml(mode.desc)}</span></div></div>
+                <div class="pmp14-metrics">
+                    <div><b>${commonPct}%</b><span>共同行</span></div>
+                    <div><b>${counts.changed}</b><span>修改</span></div>
+                    <div><b>${counts.onlyA}</b><span>A 独有</span></div>
+                    <div><b>${counts.onlyB}</b><span>B 独有</span></div>
+                </div>
+            </div>
+            <div class="pmp14-compare-legend"><span><i class="common"></i>共同</span><span><i class="changed"></i>修改</span><span><i class="removed"></i>A 独有</span><span><i class="added"></i>B 独有</span></div>
             <div class="pmp14-compare-panels">
-                <section class="pmp14-side-panel" data-scroll="compare" data-scroll-group="${pairIndex}">
-                    <header>${renderAvatar(a, true)}<div><strong>${escapeHtml(a.name)}</strong><span>ID：${escapeHtml(a.id)}</span></div><em>A 基准</em></header>
-                    <div class="pmp14-diff-body">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.a || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
+                <section class="pmp14-side-panel" data-scroll="compare">
+                    <header>${renderAvatar(a, true)}<div><strong>${escapeHtml(a.name)}</strong><span>ID：${escapeHtml(a.id)}</span></div><em>A</em></header>
+                    <div class="pmp14-diff-body" id="pmp14-left-diff">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.a || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
                 </section>
-                <div class="pmp14-diff-rail">${rows.map((row, i) => `<button class="${row.type}" data-action="jump-row" data-row="${i}" data-group="${pairIndex}" title="${row.type}">${row.type === 'same' ? '=' : row.type === 'replace' ? '≠' : row.type === 'remove' ? '−' : '+'}</button>`).join('')}</div>
-                <section class="pmp14-side-panel" data-scroll="compare" data-scroll-group="${pairIndex}">
-                    <header>${renderAvatar(b, true)}<div><strong>${escapeHtml(b.name)}</strong><span>ID：${escapeHtml(b.id)}</span></div><em>B 对比</em></header>
-                    <div class="pmp14-diff-body">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.b || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
+                <div class="pmp14-diff-rail">${rows.map((row, i) => `<button class="${row.type}" data-action="jump-row" data-row="${i}" title="${row.type}">${row.type === 'same' ? '=' : row.type === 'replace' ? '≠' : row.type === 'remove' ? '−' : '+'}</button>`).join('')}</div>
+                <section class="pmp14-side-panel" data-scroll="compare">
+                    <header>${renderAvatar(b, true)}<div><strong>${escapeHtml(b.name)}</strong><span>ID：${escapeHtml(b.id)}</span></div><em>B</em></header>
+                    <div class="pmp14-diff-body" id="pmp14-right-diff">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.b || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
                 </section>
             </div>
+        </div>`;
+}
+
+function tabButton(key, label, icon, count) {
+    return `<button class="pmp14-tab ${state.tab === key ? 'is-active' : ''}" type="button" data-action="tab" data-tab="${key}"><i class="fa-solid ${icon}"></i><span>${label}</span>${typeof count === 'number' ? `<em>${count}</em>` : ''}</button>`;
+}
+
+function renderManagerContent(personas) {
+    return state.tab === 'all' ? renderAllView(personas)
+        : state.tab === 'same-name' ? renderSameNameView(personas)
+        : state.tab === 'duplicates' ? renderDuplicateView(personas)
+        : renderSimilarView(personas);
+}
+
+function renderManager() {
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return;
+    const personas = getPersonaData();
+    const sameNameGroups = getSameNameGroups(personas);
+    const duplicateGroups = getExactDuplicateGroups(personas);
+    const similarPairs = getSimilarPairs(personas);
+
+    root.innerHTML = `
+        <div class="pmp14-backdrop" data-action="close"></div>
+        <section class="pmp14-window" role="dialog" aria-modal="true" aria-label="Persona Manager">
+            <header class="pmp14-header">
+                <div class="pmp14-brand"><div class="pmp14-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div><div><h1>Persona Manager</h1><span>整理、识别与对比你的 Persona</span></div></div>
+                <button class="pmp14-close" type="button" data-action="close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            ${state.compareIds.length >= 2 ? renderCompareWorkspace(personas) : `
+            <div class="pmp14-toolbar">
+                <div class="pmp14-search"><i class="fa-solid fa-magnifying-glass"></i><input id="pmp14-search" type="search" value="${escapeHtml(state.query)}" placeholder="搜索 Persona 名称或描述…" autocomplete="off">${state.query ? '<button data-action="clear-search"><i class="fa-solid fa-xmark"></i></button>' : ''}</div>
+                <div class="pmp14-stats"><span><b>${personas.length}</b> 全部</span><span><b>${sameNameGroups.length}</b> 同名组</span><span><b>${duplicateGroups.length}</b> 重复组</span><span><b>${similarPairs.length}</b> 相似对</span></div>
+            </div>
+            <nav class="pmp14-tabs">${tabButton('all', '全部 Persona', 'fa-layer-group')}${tabButton('same-name', '同名 Persona', 'fa-people-group', sameNameGroups.length)}${tabButton('duplicates', '完全重复', 'fa-copy', duplicateGroups.length)}${tabButton('similar', '高度相似', 'fa-clone', similarPairs.length)}</nav>
+            <main class="pmp14-content">${renderManagerContent(personas)}</main>
+            ${state.selected.size >= 2 ? `<div class="pmp14-selection-bar"><div><strong>已选择 ${state.selected.size} 个 Persona</strong><span>对比时会自动取前两个，建议选择 2 个</span></div><button class="pmp14-primary-btn" data-action="compare-selected"><i class="fa-solid fa-code-compare"></i> 开始对比</button><button class="pmp14-small-btn" data-action="clear-selection">清除选择</button></div>` : ''}`}
         </section>`;
-}
 
-
-function normalizeText(text) {
-    return String(text || '').replace(/\r\n/g, '\n').trim();
-}
-function getPersonaDescription(id) {
-    const d = (power_user.persona_descriptions || {})[id];
-    return typeof d === 'string' ? d : (d?.description || '');
-}
-function personaById(id) {
-    return getAllPersonas().find(p => p.avatarId === id);
-}
-function splitUnits(text) {
-    return normalizeText(text).split(/\n+|(?<=[。！？.!?；;])/).map(s => s.trim()).filter(Boolean);
-}
-function unitSimilarity(a,b) {
-    a=normalizeText(a); b=normalizeText(b);
-    if (!a || !b) return 0;
-    if (a === b) return 1;
-    const A=new Set(a.split(/\s+/)), B=new Set(b.split(/\s+/));
-    const inter=[...A].filter(x=>B.has(x)).length;
-    return inter/Math.max(1,new Set([...A,...B]).size);
-}
-function unorderedDiff(a,b) {
-    const A=splitUnits(a), B=splitUnits(b), used=new Set(), rows=[];
-    for (const x of A) {
-        let bi=-1, bs=0;
-        B.forEach((y,i)=>{ if(!used.has(i)){const s=unitSimilarity(x,y);if(s>bs){bs=s;bi=i;}}});
-        if (bi>=0 && bs>=0.72) {
-            used.add(bi);
-            rows.push({type:x===B[bi]?'same':'modified',a:x,b:B[bi]});
-        } else rows.push({type:'a-only',a:x,b:''});
+    const input = document.getElementById('pmp14-search');
+    if (input && document.activeElement !== input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
     }
-    B.forEach((x,i)=>{if(!used.has(i)) rows.push({type:'b-only',a:'',b:x});});
-    return rows;
+    bindCompareScroll();
 }
-function renderDiffRow(r) {
-    if(r.type==='same') return `<div class="pmp17-row same">${escapeHtml(r.a)}</div>`;
-    if(r.type==='modified') return `<div class="pmp17-row modified"><span class="pmp17-old">${escapeHtml(r.a)}</span><span class="pmp17-arrow"> → </span><span class="pmp17-new">${escapeHtml(r.b)}</span></div>`;
-    if(r.type==='a-only') return `<div class="pmp17-row a-only"><span class="pmp17-old">${escapeHtml(r.a)}</span></div>`;
-    return `<div class="pmp17-row b-only"><span class="pmp17-new">${escapeHtml(r.b)}</span></div>`;
-}
-function savePersonaDescription(id, description) {
-    const all = power_user.persona_descriptions || (power_user.persona_descriptions = {});
-    const old = all[id];
-    all[id] = (old && typeof old === 'object') ? {...old, description} : {description};
-    try {
-        const ctx = typeof getContext === 'function' ? getContext() : null;
-        const fn = ctx?.saveSettingsDebounced || window.saveSettingsDebounced;
-        if (typeof fn === 'function') fn();
-    } catch {}
-    try {
-        if (typeof eventSource?.emit === 'function' && event_types?.PERSONA_CHANGED) eventSource.emit(event_types.PERSONA_CHANGED);
-    } catch {}
-}
-function openPersonaEditor17(id, refresh) {
-    const p=personaById(id); if(!p) return;
-    document.querySelector('.pmp17-editor')?.remove();
-    const el=document.createElement('div');
-    el.className='pmp17-editor';
-    el.innerHTML=`<div class="pmp17-editor-box">
-      <div class="pmp17-editor-head"><b>编辑 Persona：${escapeHtml(p.displayName)}</b><button class="menu_button pmp17-close">×</button></div>
-      <div class="pmp17-editor-id">${escapeHtml(p.avatarId)}</div>
-      <textarea class="text_pole pmp17-text"></textarea>
-      <div class="pmp17-actions"><button class="menu_button pmp17-cancel">取消</button><button class="menu_button pmp17-save">保存并重新比较</button></div>
-    </div>`;
-    document.body.appendChild(el);
-    el.querySelector('textarea').value=getPersonaDescription(id);
-    const close=()=>el.remove();
-    el.querySelector('.pmp17-close').onclick=close;
-    el.querySelector('.pmp17-cancel').onclick=close;
-    el.querySelector('.pmp17-save').onclick=()=>{savePersonaDescription(id,el.querySelector('textarea').value);close();refresh?.();};
-}
-function renderCompareWorkspace(personas) {
-    const ids=state.compareIds?.length ? state.compareIds : personas.map(p=>p.avatarId);
-    const baseId=state.baselineId && ids.includes(state.baselineId) ? state.baselineId : ids[0];
-    state.baselineId=baseId;
-    const ps=ids.map(personaById).filter(Boolean), base=personaById(baseId);
-    if(!base || ps.length<2) return '<div class="pmp-empty">至少选择 2 个 Persona。</div>';
-    const others=ps.filter(p=>p.avatarId!==baseId);
-    return `<div class="pmp17-compare">
-      <div class="pmp17-toolbar"><b>当前基准：</b>${ps.map(p=>`<button class="menu_button pmp17-base ${p.avatarId===baseId?'active':''}" data-pmp17-base="${escapeHtml(p.avatarId)}">${escapeHtml(p.displayName)}</button>`).join('')}</div>
-      <div class="pmp17-originals">
-        <div><h4>${escapeHtml(base.displayName)} · 完整描述</h4><pre>${escapeHtml(getPersonaDescription(base.avatarId))||'（无描述）'}</pre></div>
-        ${others.map(p=>`<div><h4>${escapeHtml(p.displayName)} · 完整描述 <button class="menu_button pmp17-edit" data-pmp17-edit="${escapeHtml(p.avatarId)}">编辑</button></h4><pre>${escapeHtml(getPersonaDescription(p.avatarId))||'（无描述）'}</pre></div>`).join('')}
-      </div>
-      ${others.map(p=>`<section class="pmp17-pair"><div class="pmp17-pair-title">${escapeHtml(base.displayName)} ↔ ${escapeHtml(p.displayName)}</div><div class="pmp17-diff">${unorderedDiff(getPersonaDescription(base.avatarId),getPersonaDescription(p.avatarId)).map(renderDiffRow).join('')}</div></section>`).join('')}
-    </div>`;
-}
-function installCompareHandlers17() {
-    if(window.__pmp17Handlers)return;
-    window.__pmp17Handlers=true;
-    document.addEventListener('click',e=>{
-        const b=e.target.closest?.('[data-pmp17-base]');
-        if(b){state.baselineId=b.dataset.pmp17Base;renderManager();return;}
-        const ed=e.target.closest?.('[data-pmp17-edit]');
-        if(ed) openPersonaEditor17(ed.dataset.pmp17Edit,()=>renderManager());
+
+function ensureRoot() {
+    let root = document.getElementById(ROOT_ID);
+    if (!root) {
+        root = document.createElement('div');
+        root.id = ROOT_ID;
+        root.hidden = true;
+        document.body.appendChild(root);
+    }
+    if (root.dataset.bound === '1') return;
+    root.dataset.bound = '1';
+
+    root.addEventListener('click', event => {
+        const target = event.target.closest('[data-action]');
+        if (!target) return;
+        const action = target.dataset.action;
+        if (action === 'close') {
+            if (target.classList.contains('pmp14-backdrop') || target.classList.contains('pmp14-close')) closeManager();
+            return;
+        }
+        if (action === 'tab') { state.tab = target.dataset.tab || 'all'; state.selected.clear(); state.compareIds = []; renderManager(); return; }
+        if (action === 'clear-search') { state.query = ''; renderManager(); return; }
+        if (action === 'clear-selection') { state.selected.clear(); renderManager(); return; }
+        if (action === 'select-group') { for (const id of (target.dataset.ids || '').split('|').filter(Boolean)) state.selected.add(id); renderManager(); return; }
+        if (action === 'compare-pair') { state.compareIds = [target.dataset.a, target.dataset.b]; state.selected.clear(); renderManager(); return; }
+        if (action === 'compare-selected') { state.compareIds = [...state.selected].slice(0, 2); state.selected.clear(); renderManager(); return; }
+        if (action === 'exit-compare') { state.compareIds = []; renderManager(); return; }
+        if (action === 'swap-compare') { state.compareIds.reverse(); renderManager(); return; }
+        if (action === 'jump-row') {
+            const row = target.dataset.row;
+            document.querySelectorAll(`#pmp14-left-diff [data-row="${row}"], #pmp14-right-diff [data-row="${row}"]`).forEach(el => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+        }
+    });
+
+    root.addEventListener('change', event => {
+        const input = event.target.closest('input[data-action="select"]');
+        if (!input) return;
+        const card = input.closest('[data-persona-id]');
+        if (!card) return;
+        if (input.checked) state.selected.add(card.dataset.personaId); else state.selected.delete(card.dataset.personaId);
+        renderManager();
+    });
+
+    root.addEventListener('input', event => {
+        if (event.target.id !== 'pmp14-search') return;
+        state.query = event.target.value;
+        const caret = event.target.selectionStart;
+        renderManager();
+        const next = document.getElementById('pmp14-search');
+        if (next) next.setSelectionRange(caret, caret);
     });
 }
 
-function findGlobalSettingsHeading17() {
-    const elements = document.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span');
-    for (const el of elements) {
-        if (el.dataset?.pmp171 === 'entry') continue;
-        if (el.children.length > 3) continue;
-        const text = el.textContent?.trim();
-        if (text !== '全局设置') continue;
-        const rect = el.getBoundingClientRect();
+function bindCompareScroll() {
+    const panels = [...document.querySelectorAll('#pmp14-root [data-scroll="compare"] .pmp14-diff-body')];
+    if (panels.length !== 2) return;
+    let syncing = false;
+    panels.forEach(panel => panel.addEventListener('scroll', () => {
+        if (syncing) return;
+        syncing = true;
+        const other = panels.find(p => p !== panel);
+        if (other) other.scrollTop = panel.scrollTop;
+        requestAnimationFrame(() => { syncing = false; });
+    }));
+}
+
+function openManager(tab = 'all') {
+    ensureRoot();
+    state.active = true;
+    state.tab = tab;
+    state.selected.clear();
+    state.compareIds = [];
+    const root = document.getElementById(ROOT_ID);
+    root.hidden = false;
+    document.body.classList.add('pmp14-open');
+    renderManager();
+}
+
+function closeManager() {
+    state.active = false;
+    state.selected.clear();
+    state.compareIds = [];
+    const root = document.getElementById(ROOT_ID);
+    if (root) root.hidden = true;
+    document.body.classList.remove('pmp14-open');
+}
+
+function findGlobalSettingsHeading() {
+    const elements = document.querySelectorAll(
+        'h1,h2,h3,h4,h5,h6,legend,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span'
+    );
+    for (const element of elements) {
+        if (element.dataset.pmp14 === ENTRY_MARK) continue;
+        if (element.children.length > 3) continue;
+        const text = element.textContent?.trim();
+        // 同时兼容中文界面与英文界面
+        if (text !== '全局设置' && text !== 'Global Settings') continue;
+        const rect = element.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
-        return el;
+        return element;
     }
     return null;
 }
-function makeEntry17() {
-    const b = document.createElement('button');
-    b.id = 'persona-manager-entry';
-    b.type = 'button';
-    b.className = 'menu_button pmp17-entry';
-    b.dataset.pmp171 = 'entry';
-    b.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
-    b.addEventListener('click', () => openManager('all'));
-    return b;
+
+function makeEntry() {
+    const entry = document.createElement('button');
+    entry.id = BUTTON_ID;
+    entry.type = 'button';
+    entry.className = 'menu_button pmp14-entry';
+    entry.dataset.pmp14 = ENTRY_MARK;
+    entry.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
+    entry.addEventListener('click', () => openManager('all'));
+    return entry;
 }
-function injectEntry17() {
-    if (document.getElementById('persona-manager-entry')) return true;
-    const heading = findGlobalSettingsHeading17();
+
+function injectEntry() {
+    if (document.getElementById(BUTTON_ID)) return true;
+    const heading = findGlobalSettingsHeading();
     if (!heading?.parentNode) return false;
-    heading.parentNode.insertBefore(makeEntry17(), heading);
+    heading.parentNode.insertBefore(makeEntry(), heading);
     return true;
 }
-function installEntryObserver17() {
-    if (window.__pmp171EntryObserver) return;
+
+function installEntryObserver() {
+    if (window.__pmp14Observer) return;
     const observer = new MutationObserver(() => {
-        if (injectEntry17()) {
+        if (injectEntry()) {
             observer.disconnect();
-            window.__pmp171EntryObserver = null;
+            window.__pmp14Observer = null;
         }
     });
-    window.__pmp171EntryObserver = observer;
+    window.__pmp14Observer = observer;
     observer.observe(document.body, { childList: true, subtree: true });
-    if (injectEntry17()) {
+    if (injectEntry()) {
         observer.disconnect();
-        window.__pmp171EntryObserver = null;
+        window.__pmp14Observer = null;
     }
 }
 
-async function checkForUpdate17() {
-    const box = document.querySelector('#pmp17-update-box');
-    if (!box) return;
-    box.classList.remove('available','error');
-    box.querySelector('.pmp17-update-text').textContent = '正在检查新版本…';
-    try {
-        const r = await fetch('https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json', {cache:'no-store'});
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const remote = await r.json();
-        const rv = String(remote.version || '');
-        if (rv && rv !== VERSION) {
-            box.classList.add('available');
-            box.dataset.remoteVersion = rv;
-            box.querySelector('.pmp17-update-text').innerHTML =
-                `<b>发现新版本 ${escapeHtml(rv)}</b><br><span>${escapeHtml(remote.description || 'Persona Manager 更新')}</span>`;
-            const btn = box.querySelector('.pmp17-update-action');
-            btn.textContent = '更新';
-            btn.disabled = false;
-        } else {
-            box.querySelector('.pmp17-update-text').textContent = `已是最新版本（${VERSION}）`;
-            box.querySelector('.pmp17-update-action').textContent = '检查更新';
+function installKeyboardHandler() {
+    if (window.__pmp14Keyboard) return;
+    const handler = event => {
+        if (!state.active) return;
+        if (event.key === 'Escape') { closeManager(); return; }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+            const input = document.getElementById('pmp14-search');
+            if (input && !state.compareIds.length) { event.preventDefault(); input.focus(); }
         }
-    } catch (e) {
-        box.classList.add('error');
-        box.querySelector('.pmp17-update-text').textContent = '暂时无法检查更新，请确认网络连接。';
-        box.querySelector('.pmp17-update-action').textContent = '重试';
-    }
-}
-function installUpdateUI17() {
-    if (document.querySelector('#pmp17-update-box')) return;
-    const root = document.querySelector('#persona-manager-root, .pmp-manager-root, #persona-manager-modal');
-    if (!root) return;
-    const box = document.createElement('div');
-    box.id = 'pmp17-update-box';
-    box.innerHTML = `<div class="pmp17-update-text">检查 Persona Manager 更新…</div>
-        <button type="button" class="menu_button pmp17-update-action">检查更新</button>`;
-    root.prepend(box);
-    box.querySelector('button').addEventListener('click', async () => {
-        const rv = box.dataset.remoteVersion;
-        if (!rv || rv === VERSION) return checkForUpdate17();
-        // Let the extension manager perform the actual installation. We do not
-        // alter other extensions or rewrite its DOM.
-        if (typeof window.updateExtension === 'function') {
-            box.querySelector('button').disabled = true;
-            box.querySelector('.pmp17-update-text').textContent = `正在更新到 ${rv}…`;
-            try {
-                await window.updateExtension('persona-manager');
-                setTimeout(() => location.reload(), 1200);
-            } catch (e) {
-                box.querySelector('button').disabled = false;
-                box.querySelector('.pmp17-update-text').textContent = `更新失败：${e?.message || e}`;
-            }
-        } else {
-            box.querySelector('.pmp17-update-text').innerHTML =
-                `发现 ${escapeHtml(rv)}，请在「管理扩展」中更新。更新完成后页面会自动刷新。`;
-        }
-    });
-    checkForUpdate17();
-}
-
-
-function installUpdateUiObserver17() {
-    if (window.__pmp171UpdateObserver) return;
-    const observer = new MutationObserver(() => installUpdateUI17());
-    window.__pmp171UpdateObserver = observer;
-    observer.observe(document.body, {childList:true, subtree:true});
-    installUpdateUI17();
-}
-
-
-function startSelfVersionWatcher17() {
-    if (window.__pmp171VersionWatcher) return;
-    let last = VERSION;
-    window.__pmp171VersionWatcher = setInterval(async () => {
-        try {
-            const r = await fetch('https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json', {cache:'no-store'});
-            if (!r.ok) return;
-            const remote = await r.json();
-            const rv = String(remote.version || '');
-            if (rv && rv !== last && rv !== VERSION) {
-                clearInterval(window.__pmp171VersionWatcher);
-                location.reload();
-            }
-        } catch {}
-    }, 15000);
+    };
+    window.__pmp14Keyboard = handler;
+    document.addEventListener('keydown', handler);
 }
 
 async function init() {
     ensureRoot();
     installKeyboardHandler();
-    installCompareHandlers17();
-    installEntryObserver17();
-    installUpdateUiObserver17();
-    startSelfVersionWatcher17();
     installEntryObserver();
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
@@ -662,3 +552,11 @@ async function init() {
         if (typeof toastr !== 'undefined') toastr.error(`${EXT} 初始化失败：${error?.message || error}`);
     }
 })();
+
+/**
+ * SillyTavern 官方扩展管理器更新成功后调用（manifest.hooks.update）
+ * 在弹出 “Reload the page to apply updates” 之前触发，直接刷新使新代码生效。
+ */
+export function onUpdate() {
+    location.reload();
+}
