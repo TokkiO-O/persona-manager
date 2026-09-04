@@ -6,7 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.5.1",
-  "homePage": "https://github.com/xingx121/persona-manager",
+  "version": "1.5.3",
   "description": "SillyTavern Persona 管理工具：快速管理、同名/重复检测、全文匹配对比、多 Persona 对比与原 Persona 编辑同步。"
 }

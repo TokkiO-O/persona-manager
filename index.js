@@ -2,7 +2,7 @@ import { getContext } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.5.0';
+const VERSION = '1.5.3';
 let mounted = false;
 let managerOpen = false;
 let selected = new Set();
@@ -116,39 +116,20 @@ function personaImageUrl(id) {
     return `/thumbnail?type=persona&file=${encodeURIComponent(id)}`;
 }
 
-function findGlobalSettings() {
-    // Prefer exact visible text, then walk upward to the smallest useful settings block.
-    const candidates = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-    let node;
-    while ((node = walker.nextNode())) {
-        if (normalize(node.textContent) !== '全局设置') continue;
-        const rect = node.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0) continue;
-        candidates.push(node);
-    }
-    if (!candidates.length) return null;
-
-    candidates.sort((a, b) => {
-        const area = el => {
-            const r = el.getBoundingClientRect();
-            return r.width * r.height;
-        };
-        return area(a) - area(b);
-    });
-    return candidates[0];
-}
-
-function getSettingsBlock(anchor) {
-    if (!anchor) return null;
-    return anchor.closest(
-        '.inline-drawer, .inline-drawer-toggle, .settings-item, .range-block, .form-group, .flex-container'
-    ) || anchor.parentElement;
+function getPersonaGlobalSettings() {
+    // Current SillyTavern Persona panel: use the real structural selectors first.
+    return document.querySelector(
+        '#persona-management-button .persona_management_global_settings, ' +
+        '#PersonaManagement .persona_management_global_settings, ' +
+        '.persona_management_global_settings'
+    );
 }
 
 function createEntry() {
-    if (document.querySelector('#persona-manager-entry')) return;
-    const entry = document.createElement('div');
+    let entry = document.querySelector('#persona-manager-entry');
+    if (entry) return entry;
+
+    entry = document.createElement('div');
     entry.id = 'persona-manager-entry';
     entry.className = 'persona-manager-entry';
     entry.innerHTML = `
@@ -157,23 +138,19 @@ function createEntry() {
         <span><strong>Persona Manager</strong><small>管理、搜索、比较 Persona</small></span>
       </button>`;
     entry.querySelector('button').addEventListener('click', openManager);
-    // The entry exists immediately; it will be moved into the Persona settings area
-    // as soon as SillyTavern renders that area.
-    document.body.appendChild(entry);
+    return entry;
 }
 
 function mountEntry() {
-    const entry = document.querySelector('#persona-manager-entry');
-    const anchor = findGlobalSettings();
-    const block = getSettingsBlock(anchor);
-    if (!entry || !block || !block.parentElement) return false;
+    const target = getPersonaGlobalSettings();
+    const entry = createEntry();
+    if (!target || !target.parentElement) return false;
 
-    // Avoid accidentally nesting into itself.
-    if (entry === block || entry.contains(block)) return false;
-
-    if (entry.parentElement !== block.parentElement || entry.nextElementSibling !== block) {
-        block.parentElement.insertBefore(entry, block);
+    // Insert directly above the native "global settings" block.
+    if (entry.parentElement !== target.parentElement || entry.nextElementSibling !== target) {
+        target.parentElement.insertBefore(entry, target);
     }
+
     entry.classList.add('mounted');
     mounted = true;
     return true;
@@ -182,55 +159,52 @@ function mountEntry() {
 function boot() {
     createEntry();
 
-    // Try immediately. If the Persona settings panel is rendered later,
-    // keep the watcher alive; it is disconnected as soon as the target appears.
+    // Try immediately, then keep watching because ST can rebuild the Persona panel.
     if (mountEntry()) return;
 
     const observer = new MutationObserver(() => {
-        if (mountEntry()) observer.disconnect();
+        mountEntry();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    // Some ST UI transitions do not produce a useful mutation at the exact moment
-    // the panel becomes visible, so keep a very cheap fallback check.
-    const timer = setInterval(() => {
-        if (mountEntry()) {
-            clearInterval(timer);
-            observer.disconnect();
-        }
-    }, 750);
+    // Fallback for UI rebuilds/visibility transitions that don't give us a useful mutation.
+    const timer = setInterval(() => mountEntry(), 500);
 
     window.addEventListener('beforeunload', () => {
-        clearInterval(timer);
         observer.disconnect();
+        clearInterval(timer);
     }, { once: true });
 }
 
 function startVersionWatcher() {
-    // When SillyTavern's Extension Manager updates this extension, the currently
-    // loaded JS can still be the old version until the page is refreshed. Detect
-    // the new local manifest and refresh once automatically.
-    let lastSeen = VERSION;
+    // Poll the installed extension manifest. If the extension manager replaces the
+    // files and changes the version, reload exactly once into the new JS.
     const manifestUrl = new URL('./manifest.json', import.meta.url).href;
+    let currentVersion = VERSION;
+    let reloading = false;
 
     const check = async () => {
+        if (reloading) return;
         try {
-            const response = await fetch(`${manifestUrl}?pm_version_check=${Date.now()}`, {
+            const response = await fetch(manifestUrl + '?_pm=' + Date.now(), {
                 cache: 'no-store',
                 credentials: 'same-origin',
             });
             if (!response.ok) return;
             const manifest = await response.json();
-            const next = String(manifest?.version || '');
-            if (next && next !== lastSeen) {
-                lastSeen = next;
+            const installedVersion = String(manifest?.version || '');
+            if (installedVersion && installedVersion !== currentVersion) {
+                reloading = true;
                 location.reload();
             }
-        } catch {}
+        } catch (error) {
+            console.debug('[Persona Manager] version check skipped', error);
+        }
     };
 
-    setTimeout(check, 5000);
-    const timer = setInterval(check, 30000);
+    // Don't wait for a full interval after the extension manager has updated files.
+    setTimeout(check, 2000);
+    const timer = setInterval(check, 10000);
     window.addEventListener('beforeunload', () => clearInterval(timer), { once: true });
 }
 
@@ -462,4 +436,5 @@ document.addEventListener('keydown', e => {
 });
 
 boot();
+startVersionWatcher();
 startVersionWatcher();
