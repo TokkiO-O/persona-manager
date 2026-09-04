@@ -10,7 +10,6 @@
 
 import { getContext } from '../../../extensions.js';
 import { power_user } from '../../../power-user.js';
-import { getThumbnailUrl } from '../../../script.js';
 
 const EXT = 'Persona Manager';
 const VERSION = '1.3.1';
@@ -136,12 +135,9 @@ function getSimilarPairs(personas, threshold = 0.78) {
 }
 
 function personaImageUrl(id) {
-    try {
-        return getThumbnailUrl('persona', id);
-    } catch {
-        // Avatar display is optional; the manager remains functional.
-    }
-    return '';
+    if (!id) return '';
+
+    return `/thumbnail?type=persona&file=${encodeURIComponent(id)}`;
 }
 
 function renderAvatar(persona, large = false) {
