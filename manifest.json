@@ -6,6 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.5.3",
-  "description": "SillyTavern Persona 管理工具：快速管理、同名/重复检测、全文匹配对比、多 Persona 对比与原 Persona 编辑同步。"
+  "version": "1.6.0",
+  "description": "SillyTavern Persona 管理工具：快速入口、同名分组、完全重复检测、高相似提示与自适应 Persona 对比。"
 }
