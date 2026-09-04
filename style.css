@@ -16,6 +16,22 @@
 .pmp18-entry span { font-weight: 600; }
 .pmp18-entry small { margin-left: auto; opacity: .58; font-size: 11px; }
 
+/* Fallback floating entry when panel anchor is not found */
+.pmp18-entry-float {
+    position: fixed !important;
+    right: 18px;
+    bottom: 18px;
+    z-index: 99999;
+    width: auto !important;
+    max-width: 220px;
+    margin: 0 !important;
+    padding: 10px 14px !important;
+    box-shadow: 0 8px 28px rgba(0,0,0,.28);
+    background: var(--SmartThemeBlurTintColor, #fff) !important;
+    border: 1px solid rgba(255,138,98,.45) !important;
+    color: inherit !important;
+}
+
 body.pmp18-open { overflow: hidden !important; }
 #pmp18-root { position: fixed; inset: 0; z-index: 100000; }
 #pmp18-root[hidden] { display: none !important; }

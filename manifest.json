@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.8.0",
-  "description": "SillyTavern Persona 管理：多 Persona 对比、可切换基准、无序匹配、对比内编辑写回、自适应高亮、更新后自动刷新。",
+  "version": "1.8.1",
+  "description": "SillyTavern Persona 管理：多 Persona 对比、可切换基准、无序匹配、对比内编辑写回、自适应高亮、更稳入口（含浮动备用）、更新后自动刷新。",
   "hooks": {
     "update": "onUpdate"
   }

@@ -15,7 +15,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -858,63 +858,149 @@ function closeManager() {
     document.body.classList.remove('pmp18-open');
 }
 
-function findGlobalSettingsHeading() {
+const ENTRY_TEXTS = [
+    '全局设置',
+    'Global Settings',
+    'Persona Management',
+    'Persona 管理',
+    '用户设置',
+    'User Settings',
+    'Personas',
+];
+
+function isVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
+
+function findEntryAnchor() {
+    // 1) Prefer known ST persona / settings containers
+    const knownSelectors = [
+        '.persona_management_global_settings',
+        '#persona-management-block',
+        '#user-settings-block',
+        '.persona_management',
+        '#rm_api_block',
+    ];
+    for (const sel of knownSelectors) {
+        const node = document.querySelector(sel);
+        if (node && isVisible(node)) return { type: 'container', node };
+    }
+
+    // 2) Text match (exact or contains) on common heading-like nodes
     const elements = document.querySelectorAll(
-        'h1,h2,h3,h4,h5,h6,legend,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span'
+        'h1,h2,h3,h4,h5,h6,legend,label,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span,b,strong'
     );
     for (const element of elements) {
-        if (element.dataset.pmp18 === ENTRY_MARK) continue;
-        if (element.children.length > 3) continue;
-        const text = element.textContent?.trim();
-        if (text !== '全局设置' && text !== 'Global Settings') continue;
-        const rect = element.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        return element;
+        if (element.dataset?.pmp18 === ENTRY_MARK) continue;
+        if (element.children.length > 5) continue;
+        const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!text || text.length > 40) continue;
+        const hit = ENTRY_TEXTS.some(t => text === t || text.includes(t));
+        if (!hit) continue;
+        if (!isVisible(element)) continue;
+        return { type: 'heading', node: element };
     }
+
+    // 3) Any open drawer / right panel that looks like settings
+    const drawers = document.querySelectorAll('.drawer-content, .inline-drawer-content, #right-nav-panel, #left-nav-panel');
+    for (const d of drawers) {
+        if (!isVisible(d)) continue;
+        const t = (d.textContent || '').slice(0, 500);
+        if (/全局设置|Global Settings|Persona|用户设置|User Settings/i.test(t)) {
+            return { type: 'container', node: d };
+        }
+    }
+
     return null;
 }
 
-function makeEntry() {
+function makeEntry(floating = false) {
     const entry = document.createElement('button');
     entry.id = BUTTON_ID;
     entry.type = 'button';
-    entry.className = 'menu_button pmp18-entry';
+    entry.className = floating ? 'menu_button pmp18-entry pmp18-entry-float' : 'menu_button pmp18-entry';
     entry.dataset.pmp18 = ENTRY_MARK;
-    entry.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
+    entry.title = 'Persona Manager';
+    entry.innerHTML = floating
+        ? '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span>'
+        : '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
     entry.addEventListener('click', () => openManager('all'));
     return entry;
 }
 
 function injectEntry() {
     if (document.getElementById(BUTTON_ID)) return true;
-    const heading = findGlobalSettingsHeading();
-    if (!heading?.parentNode) return false;
-    heading.parentNode.insertBefore(makeEntry(), heading);
+
+    const anchor = findEntryAnchor();
+    if (anchor?.node) {
+        const btn = makeEntry(false);
+        if (anchor.type === 'heading' && anchor.node.parentNode) {
+            anchor.node.parentNode.insertBefore(btn, anchor.node);
+        } else {
+            // container: prepend so it is visible near the top
+            anchor.node.insertBefore(btn, anchor.node.firstChild);
+        }
+        console.log(`[${EXT}] 入口已挂载 (${anchor.type})`);
+        return true;
+    }
+    return false;
+}
+
+function injectFloatingEntry() {
+    if (document.getElementById(BUTTON_ID)) return true;
+    const btn = makeEntry(true);
+    document.body.appendChild(btn);
+    console.warn(`[${EXT}] 未找到面板挂载点，已使用右下角浮动入口。也可在控制台执行 openPersonaManager()`);
+    if (typeof toastr !== 'undefined') {
+        toastr.info('Persona Manager 使用浮动入口（右下角）。也可在控制台输入 openPersonaManager()', EXT, { timeOut: 5000 });
+    }
     return true;
 }
 
 function installEntryObserver() {
     if (window.__pmp18Observer) return;
-    let tries = 0;
-    const observer = new MutationObserver(() => {
+
+    // Always expose manual opener
+    window.openPersonaManager = () => openManager('all');
+
+    let ticks = 0;
+    const tryInject = () => {
         if (injectEntry()) {
-            observer.disconnect();
-            window.__pmp18Observer = null;
-        } else if (++tries > 40) {
-            observer.disconnect();
-            window.__pmp18Observer = null;
-            console.warn(`[${EXT}] 未找到「全局设置 / Global Settings」挂载点，入口按钮未插入。可打开含全局设置的面板后再刷新。`);
-            if (typeof toastr !== 'undefined') {
-                toastr.warning('Persona Manager 未找到入口挂载点，请打开含「全局设置」的面板后刷新页面。', EXT, { timeOut: 6000 });
+            if (window.__pmp18Observer) {
+                window.__pmp18Observer.disconnect();
+                window.__pmp18Observer = null;
             }
+            if (window.__pmp18EntryTimer) {
+                clearInterval(window.__pmp18EntryTimer);
+                window.__pmp18EntryTimer = null;
+            }
+            return true;
         }
-    });
+        return false;
+    };
+
+    if (tryInject()) return;
+
+    const observer = new MutationObserver(() => { tryInject(); });
     window.__pmp18Observer = observer;
     observer.observe(document.body, { childList: true, subtree: true });
-    if (injectEntry()) {
-        observer.disconnect();
-        window.__pmp18Observer = null;
-    }
+
+    // Keep trying for a while; if still nothing, fall back to floating button
+    window.__pmp18EntryTimer = setInterval(() => {
+        ticks += 1;
+        if (tryInject()) return;
+        if (ticks >= 25) {
+            clearInterval(window.__pmp18EntryTimer);
+            window.__pmp18EntryTimer = null;
+            if (window.__pmp18Observer) {
+                window.__pmp18Observer.disconnect();
+                window.__pmp18Observer = null;
+            }
+            injectFloatingEntry();
+        }
+    }, 400);
 }
 
 function installKeyboardHandler() {
