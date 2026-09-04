@@ -9,8 +9,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-// v1.8.11 mobile compatibility patch
-const VERSION = '1.8.11';
+const VERSION = '1.8.10';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
