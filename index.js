@@ -1,5 +1,5 @@
 /**
- * Persona Manager v1.8.0
+ * Persona Manager v1.8.3
  * SillyTavern third-party extension
  *
  * - Multi-persona compare (≥2) with switchable baseline
@@ -10,21 +10,28 @@
  * - Configurable similarity threshold
  * - Edit confirmation
  * - Stable entry (CN/EN) + official update hook auto-reload
+ * - NEW: Version update check with NEW badge and modal
+ * - NEW: Allow same-name personas in similarity detection (toggle)
+ * - NEW: Full edit (name+description) from card list
+ * - NEW: Adjustable diff sensitivity (soft threshold)
  */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.2';
+const VERSION = '1.8.3';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
 const STORAGE_KEY = 'pmp18_settings';
+const UPDATE_STORAGE_KEY = 'pmp18_update_status';
 
 const defaultSettings = {
     similarityThreshold: 0.55,
     compareLayout: 'side', // 'side' | 'revision'
     showDiffOnly: false,
+    allowSameNameSimilarity: false,
+    diffSoftThreshold: 0.35, // for unorderedDiff soft matching
 };
 
 const state = {
@@ -140,11 +147,13 @@ function similarity(a, b) {
 
 function getSimilarPairs(personas, threshold = state.settings.similarityThreshold) {
     const pairs = [];
+    const allowSame = state.settings.allowSameNameSimilarity;
     for (let i = 0; i < personas.length; i++) {
         for (let j = i + 1; j < personas.length; j++) {
             const a = personas[i];
             const b = personas[j];
-            if (a.nameKey === b.nameKey) continue;
+            // Skip same name unless allowed
+            if (a.nameKey === b.nameKey && !allowSame) continue;
             if (!a.descriptionKey || !b.descriptionKey) continue;
             const score = similarity(a.description, b.description);
             if (score >= threshold) pairs.push({ a, b, score });
@@ -188,6 +197,7 @@ function renderCard(persona, all) {
                 <div class="pmp18-card-title-row">
                     <div class="pmp18-card-name" title="${escapeHtml(persona.name)}">${escapeHtml(persona.name)}</div>
                     ${statusBadge(persona, all)}
+                    <button class="pmp18-icon-btn" data-action="edit-full" data-id="${escapeHtml(persona.id)}" title="编辑名称与描述"><i class="fa-solid fa-pen"></i></button>
                 </div>
                 <div class="pmp18-card-id">ID：${escapeHtml(persona.id)}</div>
                 <div class="pmp18-card-description">${persona.description ? escapeHtml(persona.description) : '<span class="pmp18-muted">暂无 Persona 描述 / 备注</span>'}</div>
@@ -255,7 +265,6 @@ function renderSimilarView(personas) {
 function splitUnits(text) {
     const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
     if (!raw) return [];
-    // Prefer paragraph / blank-line splits, then single newlines, then long lines
     let parts = raw.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
     if (parts.length <= 1) parts = raw.split('\n').map(s => s.trim()).filter(Boolean);
     return parts;
@@ -266,16 +275,14 @@ function unitSimilarity(a, b) {
 }
 
 /**
- * Unordered best matching:
- * 1. exact normalized matches
- * 2. greedy best remaining pairs above soft threshold
- * Returns array of { type, a, b } where type: same | replace | remove | add
+ * Unordered best matching with adjustable soft threshold
  */
 function unorderedDiff(aText, bText) {
     const aUnits = splitUnits(aText);
     const bUnits = splitUnits(bText);
     const usedB = new Set();
     const pairs = [];
+    const soft = state.settings.diffSoftThreshold; // configurable
 
     // Pass 1: exact
     for (let i = 0; i < aUnits.length; i++) {
@@ -294,7 +301,6 @@ function unorderedDiff(aText, bText) {
     }
 
     // Pass 2: best similarity for pending
-    const soft = 0.35;
     for (const p of pairs) {
         if (p.type !== 'pending') continue;
         let bestJ = -1;
@@ -324,7 +330,6 @@ function unorderedDiff(aText, bText) {
         pairs.push({ type: 'add', a: '', b: bUnits[j], ai: -1, bj: j });
     }
 
-    // Keep approximate original order of A, then adds at end
     pairs.sort((x, y) => {
         if (x.ai >= 0 && y.ai >= 0) return x.ai - y.ai;
         if (x.ai >= 0) return -1;
@@ -401,9 +406,9 @@ function inlineDiffHtml(a, b) {
 }
 
 function diffModeClass(score) {
-    if (score >= 0.85) return 'mode-high';   // emphasize differences
+    if (score >= 0.85) return 'mode-high';
     if (score >= 0.5) return 'mode-mid';
-    return 'mode-low';                      // emphasize common
+    return 'mode-low';
 }
 
 function countPairStats(rows) {
@@ -419,7 +424,6 @@ function renderDiffBlock(row, layout, showDiffOnly) {
     if (showDiffOnly && row.type === 'same') return '';
 
     if (layout === 'revision') {
-        // Revision: base (A) text with inline marks of what B changed relative to A
         if (row.type === 'same') {
             return `<div class="pmp18-rev-block same"><div class="pmp18-rev-text">${escapeHtml(row.a)}</div></div>`;
         }
@@ -429,7 +433,6 @@ function renderDiffBlock(row, layout, showDiffOnly) {
         if (row.type === 'add') {
             return `<div class="pmp18-rev-block add"><div class="pmp18-rev-text"><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div></div>`;
         }
-        // replace
         const { left, right } = inlineDiffHtml(row.a, row.b);
         return `<div class="pmp18-rev-block replace">
             <div class="pmp18-rev-label">修改</div>
@@ -471,7 +474,6 @@ function renderColumnBody(baseText, otherText, layout, showDiffOnly, isBaselineO
         if (!units.length) return '<div class="pmp18-muted" style="padding:12px">（无描述）</div>';
         return units.map(u => `<div class="pmp18-col-block">${escapeHtml(u)}</div>`).join('');
     }
-    // Single-column relative to baseline (works for both "side highlight" and "revision")
     const rows = unorderedDiff(baseText, otherText);
     const parts = [];
     for (const row of rows) {
@@ -479,7 +481,6 @@ function renderColumnBody(baseText, otherText, layout, showDiffOnly, isBaselineO
         if (row.type === 'same') {
             parts.push(`<div class="pmp18-col-block same">${escapeHtml(row.b || row.a)}</div>`);
         } else if (row.type === 'remove') {
-            // present in baseline only — show as deleted reference in other column
             parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">基准有</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
         } else if (row.type === 'add') {
             parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">对方有</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
@@ -522,7 +523,6 @@ function renderCompareWorkspace(personas) {
         return `<button type="button" class="pmp18-base-btn ${active}" data-action="set-baseline" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
     }).join('');
 
-    // Fixed baseline column + horizontal scrollable others
     const otherCols = others.map(o => {
         const score = similarity(base.description, o.description);
         const rows = unorderedDiff(base.description, o.description);
@@ -537,7 +537,7 @@ function renderCompareWorkspace(personas) {
                             <strong title="${escapeHtml(o.name)}">${escapeHtml(o.name)}</strong>
                             <span>对比 · ${Math.round(score * 100)}%</span>
                         </div>
-                        <button type="button" class="pmp18-icon-btn" data-action="edit-persona" data-id="${escapeHtml(o.id)}" title="编辑"><i class="fa-solid fa-pen"></i></button>
+                        <button type="button" class="pmp18-icon-btn" data-action="edit-persona" data-id="${escapeHtml(o.id)}" title="编辑描述"><i class="fa-solid fa-pen"></i></button>
                     </div>
                     <div class="pmp18-pair-stats">
                         <span>同 ${stats.same}</span>
@@ -593,14 +593,250 @@ function tabButton(key, label, icon, count) {
     return `<button class="pmp18-tab ${state.tab === key ? 'is-active' : ''}" type="button" data-action="tab" data-tab="${key}"><i class="fa-solid ${icon}"></i><span>${label}</span>${typeof count === 'number' ? `<em>${count}</em>` : ''}</button>`;
 }
 
+/* ---------- Version update ---------- */
+async function checkForUpdates() {
+    try {
+        const response = await fetch('https://api.github.com/repos/xingx121/persona-manager/releases/latest');
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        const latestVersion = data.tag_name.replace(/^v/, '');
+        const hasUpdate = latestVersion !== VERSION;
+        const updateInfo = {
+            latestVersion,
+            hasUpdate,
+            releaseNotes: data.body || '暂无更新日志',
+            checkedAt: Date.now()
+        };
+        localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
+        return updateInfo;
+    } catch (e) {
+        console.warn('[Persona Manager] 检查更新失败:', e);
+        return null;
+    }
+}
+
+function getUpdateStatus() {
+    try {
+        const raw = localStorage.getItem(UPDATE_STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        // Check if stale (older than 1 hour)
+        if (Date.now() - data.checkedAt > 3600000) return { ...data, stale: true };
+        return data;
+    } catch { return null; }
+}
+
+function showUpdateModal(updateInfo) {
+    const overlay = document.createElement('div');
+    overlay.className = 'pmp18-editor-overlay pmp18-update-modal';
+    const notes = updateInfo?.releaseNotes || '无更新日志';
+    const latest = updateInfo?.latestVersion || '未知';
+    overlay.innerHTML = `
+        <div class="pmp18-editor">
+            <div class="pmp18-editor-head">
+                <strong>📦 版本更新</strong>
+                <span>当前 v${VERSION} → 最新 v${latest}</span>
+                <button type="button" class="pmp18-close pmp18-editor-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="pmp18-editor-body">
+                <div class="pmp18-release-notes">${escapeHtml(notes)}</div>
+            </div>
+            <div class="pmp18-editor-actions">
+                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">稍后</button>
+                <a href="https://github.com/xingx121/persona-manager/releases/latest" target="_blank" rel="noopener noreferrer" class="pmp18-primary-btn" style="text-decoration:none;">前往下载</a>
+            </div>
+            <p class="pmp18-editor-note">点击“前往下载”跳转到 GitHub Release 页面，手动安装或使用扩展管理器更新。</p>
+        </div>`;
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.pmp18-editor-close').onclick = close;
+    overlay.querySelector('.pmp18-editor-cancel').onclick = close;
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+}
+
+/* ---------- Edit functions ---------- */
+function persistPersonaDescription(id, description) {
+    if (!power_user) return false;
+    if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
+    power_user.persona_descriptions[id] = description;
+    try {
+        if (typeof window.saveSettingsDebounced === 'function') {
+            window.saveSettingsDebounced();
+            return true;
+        }
+    } catch { /* ignore */ }
+    try {
+        if (typeof window.saveSettings === 'function') {
+            window.saveSettings();
+            return true;
+        }
+    } catch { /* ignore */ }
+    try {
+        document.dispatchEvent(new CustomEvent('pmp18-persona-updated', { detail: { id, description } }));
+    } catch { /* ignore */ }
+    return true;
+}
+
+function persistPersonaFull(id, name, description) {
+    if (!power_user) return false;
+    // Update name
+    if (power_user.personas) {
+        power_user.personas[id] = name;
+    }
+    // Update description
+    if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
+    power_user.persona_descriptions[id] = description;
+    // Save
+    try {
+        if (typeof window.saveSettingsDebounced === 'function') {
+            window.saveSettingsDebounced();
+            return true;
+        }
+    } catch { /* ignore */ }
+    try {
+        if (typeof window.saveSettings === 'function') {
+            window.saveSettings();
+            return true;
+        }
+    } catch { /* ignore */ }
+    try {
+        document.dispatchEvent(new CustomEvent('pmp18-persona-updated', { detail: { id, name, description } }));
+    } catch { /* ignore */ }
+    return true;
+}
+
+function openEditor(id) {
+    const personas = getPersonaData();
+    const p = personas.find(x => x.id === id);
+    if (!p) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pmp18-editor-overlay';
+    overlay.innerHTML = `
+        <div class="pmp18-editor">
+            <div class="pmp18-editor-head">
+                <strong>编辑 Persona 描述</strong>
+                <span>${escapeHtml(p.name)}</span>
+                <button type="button" class="pmp18-close pmp18-editor-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <textarea class="pmp18-editor-ta" rows="16" spellcheck="false">${escapeHtml(p.description)}</textarea>
+            <div class="pmp18-editor-actions">
+                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">取消</button>
+                <button type="button" class="pmp18-primary-btn pmp18-editor-save">保存并更新对比</button>
+            </div>
+            <p class="pmp18-editor-note">保存后会写入原 Persona 数据，并立即刷新当前对比结果。</p>
+        </div>`;
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.pmp18-editor-close').onclick = close;
+    overlay.querySelector('.pmp18-editor-cancel').onclick = close;
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    overlay.querySelector('.pmp18-editor-save').onclick = () => {
+        const next = overlay.querySelector('.pmp18-editor-ta').value;
+        if (next === p.description) {
+            close();
+            return;
+        }
+        const ok = window.confirm('确认将修改写回原 Persona？此操作会更新 SillyTavern 中的描述数据。');
+        if (!ok) return;
+        persistPersonaDescription(id, next);
+        close();
+        if (typeof toastr !== 'undefined') toastr.success('已写回 Persona 描述');
+        renderManager();
+    };
+
+    document.body.appendChild(overlay);
+    overlay.querySelector('.pmp18-editor-ta').focus();
+}
+
+function openFullEditor(id) {
+    const personas = getPersonaData();
+    const p = personas.find(x => x.id === id);
+    if (!p) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pmp18-editor-overlay pmp18-full-editor';
+    overlay.innerHTML = `
+        <div class="pmp18-editor">
+            <div class="pmp18-editor-head">
+                <strong>编辑 Persona</strong>
+                <span>ID: ${escapeHtml(p.id)}</span>
+                <button type="button" class="pmp18-close pmp18-editor-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <label style="margin: 8px 16px 0; font-size:12px; opacity:.6;">名称</label>
+            <input class="pmp18-editor-input" type="text" value="${escapeHtml(p.name)}" spellcheck="false">
+            <label style="margin: 8px 16px 0; font-size:12px; opacity:.6;">描述</label>
+            <textarea class="pmp18-editor-ta" rows="12" spellcheck="false">${escapeHtml(p.description)}</textarea>
+            <div class="pmp18-editor-actions">
+                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">取消</button>
+                <button type="button" class="pmp18-primary-btn pmp18-editor-save">保存</button>
+            </div>
+            <p class="pmp18-editor-note">修改后立即生效，刷新当前列表。</p>
+        </div>`;
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.pmp18-editor-close').onclick = close;
+    overlay.querySelector('.pmp18-editor-cancel').onclick = close;
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    overlay.querySelector('.pmp18-editor-save').onclick = () => {
+        const newName = overlay.querySelector('.pmp18-editor-input').value.trim() || p.id;
+        const newDesc = overlay.querySelector('.pmp18-editor-ta').value;
+        if (newName === p.name && newDesc === p.description) {
+            close();
+            return;
+        }
+        const ok = window.confirm('确认修改？将更新名称和描述。');
+        if (!ok) return;
+        persistPersonaFull(id, newName, newDesc);
+        close();
+        if (typeof toastr !== 'undefined') toastr.success('Persona 已更新');
+        renderManager();
+    };
+
+    document.body.appendChild(overlay);
+    overlay.querySelector('.pmp18-editor-input').focus();
+}
+
+/* ---------- Settings panel ---------- */
 function renderSettingsPanel() {
     const t = Math.round(state.settings.similarityThreshold * 100);
+    const soft = Math.round(state.settings.diffSoftThreshold * 100);
+    const allowSame = state.settings.allowSameNameSimilarity || false;
+
+    const updateStatus = getUpdateStatus();
+    const hasUpdate = updateStatus?.hasUpdate || false;
+    const latestVer = updateStatus?.latestVersion || '';
+
     return `
         <div class="pmp18-settings">
+            <div class="pmp18-settings-row">
+                <div class="pmp18-version-info">
+                    <span style="font-weight:600;">当前版本：v${VERSION}</span>
+                    ${hasUpdate ? `<span class="pmp18-version-badge pmp18-version-new">NEW</span>` : ''}
+                    ${latestVer ? `<span style="font-size:12px;opacity:.6;">最新：v${latestVer}</span>` : ''}
+                    <button class="pmp18-version-btn" data-action="check-update"><i class="fa-solid fa-rotate"></i> 检查更新</button>
+                </div>
+                <span class="pmp18-muted" style="font-size:12px;">点击“检查更新”可获取最新版本信息。</span>
+            </div>
             <div class="pmp18-settings-row">
                 <label>相似检测阈值 <b id="pmp18-th-val">${t}%</b></label>
                 <input type="range" id="pmp18-threshold" min="30" max="90" step="5" value="${t}" data-action="threshold">
                 <span class="pmp18-muted">低于此值的相似对不会出现在「高度相似」标签</span>
+            </div>
+            <div class="pmp18-settings-row" style="border-top:1px solid rgba(127,127,127,.12);padding-top:12px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+                    <input type="checkbox" id="pmp18-allow-same-name" ${allowSame ? 'checked' : ''} data-action="toggle-same-name-similarity">
+                    允许同名 Persona 参与相似度检测
+                </label>
+                <span class="pmp18-muted" style="font-size:12px;">开启后，即使 Persona 名称相同，也会依据描述内容进行相似度比对</span>
+            </div>
+            <div class="pmp18-settings-row" style="border-top:1px solid rgba(127,127,127,.12);padding-top:12px;">
+                <label>差异检测敏感度 <b id="pmp18-soft-val">${soft}%</b></label>
+                <input type="range" id="pmp18-soft-threshold" min="10" max="60" step="5" value="${soft}" data-action="soft-threshold">
+                <span class="pmp18-muted">控制段落匹配的宽松程度，值越低差异越容易被标注（推荐 30% ~ 45%）</span>
             </div>
         </div>`;
 }
@@ -675,78 +911,6 @@ function renderManager() {
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
     }
-}
-
-/* ---------- Edit + write-back ---------- */
-
-function persistPersonaDescription(id, description) {
-    if (!power_user) return false;
-    if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
-    power_user.persona_descriptions[id] = description;
-
-    // Try common SillyTavern save paths
-    try {
-        if (typeof window.saveSettingsDebounced === 'function') {
-            window.saveSettingsDebounced();
-            return true;
-        }
-    } catch { /* ignore */ }
-    try {
-        if (typeof window.saveSettings === 'function') {
-            window.saveSettings();
-            return true;
-        }
-    } catch { /* ignore */ }
-    // Fallback: dispatch a soft event some builds listen to
-    try {
-        document.dispatchEvent(new CustomEvent('pmp18-persona-updated', { detail: { id, description } }));
-    } catch { /* ignore */ }
-    return true;
-}
-
-function openEditor(id) {
-    const personas = getPersonaData();
-    const p = personas.find(x => x.id === id);
-    if (!p) return;
-
-    const overlay = document.createElement('div');
-    overlay.className = 'pmp18-editor-overlay';
-    overlay.innerHTML = `
-        <div class="pmp18-editor">
-            <div class="pmp18-editor-head">
-                <strong>编辑 Persona 描述</strong>
-                <span>${escapeHtml(p.name)}</span>
-                <button type="button" class="pmp18-close pmp18-editor-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <textarea class="pmp18-editor-ta" rows="16" spellcheck="false">${escapeHtml(p.description)}</textarea>
-            <div class="pmp18-editor-actions">
-                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">取消</button>
-                <button type="button" class="pmp18-primary-btn pmp18-editor-save">保存并更新对比</button>
-            </div>
-            <p class="pmp18-editor-note">保存后会写入原 Persona 数据，并立即刷新当前对比结果。</p>
-        </div>`;
-
-    const close = () => overlay.remove();
-    overlay.querySelector('.pmp18-editor-close').onclick = close;
-    overlay.querySelector('.pmp18-editor-cancel').onclick = close;
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-
-    overlay.querySelector('.pmp18-editor-save').onclick = () => {
-        const next = overlay.querySelector('.pmp18-editor-ta').value;
-        if (next === p.description) {
-            close();
-            return;
-        }
-        const ok = window.confirm('确认将修改写回原 Persona？此操作会更新 SillyTavern 中的描述数据。');
-        if (!ok) return;
-        persistPersonaDescription(id, next);
-        close();
-        if (typeof toastr !== 'undefined') toastr.success('已写回 Persona 描述');
-        renderManager();
-    };
-
-    document.body.appendChild(overlay);
-    overlay.querySelector('.pmp18-editor-ta').focus();
 }
 
 /* ---------- Root / events ---------- */
@@ -829,16 +993,47 @@ function ensureRoot() {
             openEditor(target.dataset.id);
             return;
         }
+        if (action === 'edit-full') {
+            openFullEditor(target.dataset.id);
+            return;
+        }
+        if (action === 'check-update') {
+            // Force check and show modal
+            const btn = target;
+            btn.disabled = true;
+            btn.textContent = '检查中...';
+            checkForUpdates().then(info => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> 检查更新';
+                if (info) {
+                    showUpdateModal(info);
+                } else {
+                    if (typeof toastr !== 'undefined') toastr.warning('无法获取更新信息，请检查网络。');
+                }
+            }).catch(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> 检查更新';
+            });
+            return;
+        }
     });
 
     root.addEventListener('change', event => {
         const input = event.target.closest('input[data-action="select"]');
-        if (!input) return;
-        const card = input.closest('[data-persona-id]');
-        if (!card) return;
-        if (input.checked) state.selected.add(card.dataset.personaId);
-        else state.selected.delete(card.dataset.personaId);
-        renderManager();
+        if (input) {
+            const card = input.closest('[data-persona-id]');
+            if (!card) return;
+            if (input.checked) state.selected.add(card.dataset.personaId);
+            else state.selected.delete(card.dataset.personaId);
+            renderManager();
+            return;
+        }
+        if (event.target.id === 'pmp18-allow-same-name') {
+            state.settings.allowSameNameSimilarity = event.target.checked;
+            saveSettingsLocal();
+            renderManager();
+            return;
+        }
     });
 
     root.addEventListener('input', event => {
@@ -856,6 +1051,15 @@ function ensureRoot() {
             saveSettingsLocal();
             const label = document.getElementById('pmp18-th-val');
             if (label) label.textContent = `${Math.round(state.settings.similarityThreshold * 100)}%`;
+            return;
+        }
+        if (event.target.id === 'pmp18-soft-threshold') {
+            const v = Number(event.target.value) / 100;
+            state.settings.diffSoftThreshold = Math.min(0.6, Math.max(0.1, v));
+            saveSettingsLocal();
+            const label = document.getElementById('pmp18-soft-val');
+            if (label) label.textContent = `${Math.round(state.settings.diffSoftThreshold * 100)}%`;
+            return;
         }
     });
 }
@@ -871,6 +1075,15 @@ function openManager(tab = 'all') {
     root.hidden = false;
     document.body.classList.add('pmp18-open');
     renderManager();
+    // Background check for updates once per session
+    if (!window.__pmp18UpdateChecked) {
+        window.__pmp18UpdateChecked = true;
+        checkForUpdates().then(info => {
+            if (info?.hasUpdate && typeof toastr !== 'undefined') {
+                toastr.info(`有新版本 v${info.latestVersion} 可用！`, EXT, { timeOut: 8000 });
+            }
+        }).catch(() => {});
+    }
 }
 
 function closeManager() {
@@ -893,14 +1106,7 @@ const ENTRY_TEXTS = [
     'Personas',
 ];
 
-function isVisible(el) {
-    if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-}
-
 function findEntryAnchor() {
-    // 1) Hard anchors from real ST DOM (may be inside closed drawers — still mount)
     const hardIds = [
         'persona-management-block',
         'user-settings-block-content',
@@ -916,7 +1122,6 @@ function findEntryAnchor() {
     );
     if (hardClass) return { type: 'container', node: hardClass };
 
-    // 2) H3/标题「用户设置」
     const headings = document.querySelectorAll('h3,h2,h4,.inline-drawer-header');
     for (const el of headings) {
         const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -925,7 +1130,6 @@ function findEntryAnchor() {
         }
     }
 
-    // 3) Text match on short labels
     const elements = document.querySelectorAll(
         'h1,h2,h3,h4,h5,h6,legend,label,.inline-drawer-header,.menu_section_header,span,div'
     );
@@ -964,7 +1168,6 @@ function injectEntry() {
         if (anchor.type === 'heading' && anchor.node.parentNode) {
             anchor.node.parentNode.insertBefore(btn, anchor.node);
         } else {
-            // Prefer top of persona-management-block / user-settings content
             anchor.node.insertBefore(btn, anchor.node.firstChild);
         }
         console.log(`[${EXT}] 入口已挂载 (${anchor.type}${anchor.id ? ' #' + anchor.id : ''})`);
@@ -993,7 +1196,6 @@ function installEntryObserver() {
     let floatingDone = false;
 
     const tryInject = () => {
-        // If floating exists but panel is now available, upgrade to panel button
         const existing = document.getElementById(BUTTON_ID);
         if (existing && !existing.classList.contains('pmp18-entry-float')) return true;
         if (existing?.classList.contains('pmp18-entry-float')) {
@@ -1016,7 +1218,6 @@ function installEntryObserver() {
     window.__pmp18Observer = observer;
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Also re-try when user opens user-settings / persona drawers
     document.addEventListener('click', () => {
         setTimeout(tryInject, 150);
         setTimeout(tryInject, 500);
@@ -1025,7 +1226,6 @@ function installEntryObserver() {
     window.__pmp18EntryTimer = setInterval(() => {
         ticks += 1;
         if (tryInject()) {
-            // keep observer: drawer may re-render and wipe the button
             return;
         }
         if (!floatingDone && ticks >= 20) {
@@ -1060,6 +1260,8 @@ async function init() {
     ensureRoot();
     installKeyboardHandler();
     installEntryObserver();
+    // Pre-check updates silently
+    checkForUpdates().catch(() => {});
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
 
@@ -1072,9 +1274,6 @@ async function init() {
     }
 })();
 
-/**
- * SillyTavern official extension manager calls this after a successful update.
- */
 export function onUpdate() {
     location.reload();
 }
