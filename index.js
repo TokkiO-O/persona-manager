@@ -1,5 +1,5 @@
 /**
- * Persona Manager v1.8.8
+ * Persona Manager v1.8.9
  * - Fix list-edit writing into the wrong persona
  * - Focus compare: baseline + one other (switchable)
  * - Remote CHANGELOG.md for update notes
@@ -9,7 +9,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.8';
+const VERSION = '1.8.9';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -915,6 +915,54 @@ async function fetchText(url) {
     return r.text();
 }
 
+/** ST API calls need X-CSRF-Token or ForbiddenError: Invalid CSRF token */
+async function getStRequestHeaders() {
+    try {
+        if (typeof window.getRequestHeaders === 'function') {
+            return window.getRequestHeaders();
+        }
+    } catch { /* ignore */ }
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        if (typeof ctx?.getRequestHeaders === 'function') {
+            return ctx.getRequestHeaders();
+        }
+    } catch { /* ignore */ }
+    let token = 'disabled';
+    try {
+        const r = await fetch('/csrf-token', { credentials: 'same-origin' });
+        if (r.ok) {
+            const data = await r.json();
+            if (data?.token) token = data.token;
+        }
+    } catch { /* ignore */ }
+    return {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': token,
+    };
+}
+
+async function callExtensionUpdate() {
+    // Prefer ST's own updater if exposed
+    if (typeof window.updateExtension === 'function') {
+        return window.updateExtension('persona-manager');
+    }
+    const headers = await getStRequestHeaders();
+    const res = await fetch('/api/extensions/update', {
+        method: 'POST',
+        headers,
+        credentials: 'same-origin',
+        body: JSON.stringify({ extensionName: 'persona-manager', global: false }),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+    try {
+        return text ? JSON.parse(text) : {};
+    } catch {
+        return { message: text };
+    }
+}
+
 async function checkForUpdates() {
     state.updateInfo = { checking: true };
     if (state.tab === 'settings') renderManager();
@@ -988,23 +1036,15 @@ function showUpdateModal() {
             doBtn.disabled = true;
             doBtn.textContent = '更新中…';
             try {
-                if (typeof window.updateExtension === 'function') {
-                    await window.updateExtension('persona-manager');
-                } else {
-                    const res = await fetch('/api/extensions/update', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ extensionName: 'persona-manager', global: false }),
-                    });
-                    if (!res.ok) throw new Error(await res.text());
-                }
+                await callExtensionUpdate();
                 doBtn.textContent = '完成，正在刷新…';
                 setTimeout(() => location.reload(), 500);
             } catch (e) {
                 doBtn.disabled = false;
                 doBtn.textContent = '立即更新';
-                if (typeof toastr !== 'undefined') toastr.error(`更新失败：${e?.message || e}`);
+                const msg = e?.message || String(e);
+                if (typeof toastr !== 'undefined') toastr.error(`更新失败：${msg}`);
+                console.error(`[${EXT}] update failed`, e);
             }
         };
     }

@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.8.8",
-  "description": "Persona 管理：节标题合并对齐、多对象横滑点选细比、更新日志仅显示最新版本。",
+  "version": "1.8.9",
+  "description": "Persona 管理：修复扩展内更新 CSRF；节对齐与多对象点选细比。",
   "hooks": {
     "update": "onUpdate"
   }
