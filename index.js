@@ -10,9 +10,10 @@
 
 import { getContext } from '../../../extensions.js';
 import { power_user } from '../../../power-user.js';
+import { getThumbnailUrl } from '../../../script.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const ROOT_ID = 'pmp13-root';
 const BUTTON_ID = 'pmp13-entry';
 
@@ -36,13 +37,39 @@ const normalizeText = (value = '') => String(value)
     .trim()
     .toLocaleLowerCase();
 
+/**
+ * SillyTavern stores each persona description as an object, not a plain string.
+ * Current versions use: persona_descriptions[id].description.
+ * Older/variant data may still contain a plain string, so keep a compatibility
+ * fallback instead of ever rendering an object as "[object Object]".
+ */
+function getPersonaDescription(raw) {
+    if (raw == null) return '';
+    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+        return String(raw);
+    }
+    if (Array.isArray(raw)) {
+        return raw.map(getPersonaDescription).filter(Boolean).join('\n');
+    }
+    if (typeof raw === 'object') {
+        const preferredKeys = ['description', 'text', 'content', 'value', 'persona_description'];
+        for (const key of preferredKeys) {
+            if (raw[key] != null) {
+                const text = getPersonaDescription(raw[key]);
+                if (text) return text;
+            }
+        }
+    }
+    return '';
+}
+
 function getPersonaData() {
     const personas = power_user?.personas || {};
     const descriptions = power_user?.persona_descriptions || {};
 
     return Object.entries(personas).map(([id, rawName]) => {
         const name = String(rawName ?? id);
-        const description = String(descriptions?.[id] ?? '');
+        const description = getPersonaDescription(descriptions?.[id]);
         return {
             id,
             name,
@@ -110,10 +137,7 @@ function getSimilarPairs(personas, threshold = 0.78) {
 
 function personaImageUrl(id) {
     try {
-        const context = getContext();
-        if (typeof context?.getThumbnailUrl === 'function') {
-            return context.getThumbnailUrl('persona', id);
-        }
+        return getThumbnailUrl('persona', id);
     } catch {
         // Avatar display is optional; the manager remains functional.
     }
