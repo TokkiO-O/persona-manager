@@ -9,7 +9,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.9';
+const VERSION = '1.8.10';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -82,6 +82,15 @@ function getPersonaDescription(raw) {
     return '';
 }
 
+/** ST Persona Title / 备注 */
+function getPersonaTitle(raw) {
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return '';
+    for (const key of ['title', 'memo', 'note', '备注', 'persona_title']) {
+        if (raw[key] != null && String(raw[key]).trim()) return String(raw[key]).trim();
+    }
+    return '';
+}
+
 function getActiveAvatarId() {
     try {
         if (power_user?.user_avatar) return String(power_user.user_avatar);
@@ -97,15 +106,26 @@ function getPersonaData() {
     const descriptions = power_user?.persona_descriptions || {};
     return Object.entries(personas).map(([id, rawName]) => {
         const name = String(rawName ?? id);
-        const description = getPersonaDescription(descriptions?.[id]);
+        const rawDesc = descriptions?.[id];
+        const description = getPersonaDescription(rawDesc);
+        const title = getPersonaTitle(rawDesc);
         return {
             id: String(id),
             name,
+            title,
             description,
             nameKey: normalizeText(name),
             descriptionKey: normalizeText(description),
         };
     });
+}
+
+function formatPersonaSubline(persona) {
+    // 备注优先，没有则退回短 ID，用于同名同头像区分
+    if (persona.title) return persona.title;
+    const id = String(persona.id || '');
+    if (id.length <= 18) return id;
+    return `${id.slice(0, 8)}…${id.slice(-6)}`;
 }
 
 function savePowerUserSettings() {
@@ -192,6 +212,40 @@ function persistPersonaFull(targetId, name, description) {
     power_user.personas[id] = String(name ?? id);
     console.log(`[${EXT}] wrote name for id=${id}`);
     return persistPersonaDescription(id, description);
+}
+
+function deletePersonaById(targetId) {
+    const id = String(targetId || '');
+    if (!id || !power_user) return false;
+    if (!power_user.personas || !(id in power_user.personas)) {
+        console.error(`[${EXT}] delete: id not found`, id);
+        return false;
+    }
+    const name = power_user.personas[id];
+    delete power_user.personas[id];
+    if (power_user.persona_descriptions && id in power_user.persona_descriptions) {
+        delete power_user.persona_descriptions[id];
+    }
+    // If deleted was default / active, clear lightly (ST may also handle via event)
+    try {
+        if (power_user.default_persona === id) power_user.default_persona = null;
+    } catch { /* ignore */ }
+
+    state.selected.delete(id);
+    state.compareIds = state.compareIds.filter(x => x !== id);
+    if (state.baselineId === id) state.baselineId = state.compareIds[0] || null;
+    if (state.focusOtherId === id) state.focusOtherId = state.compareIds.find(x => x !== state.baselineId) || null;
+
+    savePowerUserSettings();
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        const es = ctx?.eventSource;
+        const types = ctx?.eventTypes || ctx?.event_types;
+        if (es?.emit && types?.PERSONA_DELETED) es.emit(types.PERSONA_DELETED, id);
+        else if (es?.emit) es.emit('PERSONA_DELETED', id);
+    } catch { /* ignore */ }
+    console.log(`[${EXT}] deleted persona id=${id} name=${name}`);
+    return true;
 }
 
 /* ---------- Grouping / similarity ---------- */
@@ -499,6 +553,89 @@ function diffModeClass(score) {
     return 'mode-low';
 }
 
+function looksStructured(text) {
+    const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 3) return false;
+    const field = lines.filter(l => /^[\w\u4e00-\u9fff./_-]+\s*[:：]/.test(l)).length;
+    return field / lines.length >= 0.4;
+}
+
+/** Shared short facts (numbers, measures, short phrases) for cross-structure compare */
+function extractSharedSnippets(aText, bText) {
+    const a = String(aText || '');
+    const b = String(bText || '');
+    if (!a || !b) return [];
+
+    const candidates = new Set();
+    const pushMatches = (text, re) => {
+        const m = text.match(re) || [];
+        for (const x of m) {
+            const t = x.trim();
+            if (t.length >= 2) candidates.add(t);
+        }
+    };
+    // measurements / dates / short alnum
+    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|m|岁|年|月|日|%|cm|CM|KG)?/gi);
+    pushMatches(a, /[A-Za-z\u4e00-\u9fff]{2,12}/g);
+
+    const shared = [];
+    const bNorm = b;
+    for (const c of candidates) {
+        if (c.length < 2 || c.length > 24) continue;
+        if (/^(的|了|和|与|或|在|是|有|我|你|他|她|它)$/.test(c)) continue;
+        if (bNorm.includes(c)) shared.push(c);
+    }
+    // unique, longer first
+    const seen = new Set();
+    return shared
+        .sort((x, y) => y.length - x.length)
+        .filter(s => {
+            const k = normalizeText(s);
+            if (seen.has(k)) return false;
+            // drop if contained in already kept longer snippet
+            for (const keep of seen) {
+                if (keep.includes(k) && keep !== k) return false;
+            }
+            seen.add(k);
+            return true;
+        })
+        .slice(0, 40);
+}
+
+function shouldUseFragmentMode(baseText, otherText, score) {
+    if (score < 0.15) return true;
+    const aS = looksStructured(baseText);
+    const bS = looksStructured(otherText);
+    if (aS !== bS) return true;
+    return false;
+}
+
+function highlightSnippets(text, snippets) {
+    let html = escapeHtml(text);
+    const sorted = [...snippets].sort((a, b) => b.length - a.length);
+    for (const s of sorted) {
+        const esc = escapeHtml(s);
+        if (!esc) continue;
+        html = html.split(esc).join(`<mark class="pmp18-share">${esc}</mark>`);
+    }
+    return html;
+}
+
+function renderFragmentCompare(baseText, otherText) {
+    const shared = extractSharedSnippets(baseText, otherText);
+    const shareHtml = shared.length
+        ? `<div class="pmp18-share-list">${shared.map(s => `<span class="pmp18-share-chip">${escapeHtml(s)}</span>`).join('')}</div>`
+        : `<div class="pmp18-muted">未抽出可对齐的共同短句/数字（结构差异较大时属正常）</div>`;
+
+    return {
+        legendExtra: true,
+        sharedCount: shared.length,
+        baseHtml: `<div class="pmp18-col-block frag">${highlightSnippets(baseText, shared)}</div>`,
+        otherHtml: `<div class="pmp18-col-block frag">${highlightSnippets(otherText, shared)}</div>`,
+        sharePanel: `<div class="pmp18-share-panel"><div class="pmp18-share-title">共同片段（${shared.length}）</div>${shareHtml}</div>`,
+    };
+}
+
 /** Symmetric blocks: side 'base' | 'other' */
 function renderFocusBlocks(baseText, otherText, side, showDiffOnly) {
     const rows = unorderedDiff(baseText, otherText);
@@ -534,10 +671,24 @@ function renderFocusBlocks(baseText, otherText, side, showDiffOnly) {
     return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无内容</div>';
 }
 
+function renderCompareLegend(fragmentMode) {
+    return `
+        <div class="pmp18-legend">
+            <span class="pmp18-legend-title">图例</span>
+            <span class="pmp18-legend-item"><i class="pmp18-leg same"></i>相同/高度重合</span>
+            <span class="pmp18-legend-item"><i class="pmp18-leg replace"></i>对应段有修改</span>
+            <span class="pmp18-legend-item"><i class="pmp18-leg remove"></i>仅基准有</span>
+            <span class="pmp18-legend-item"><i class="pmp18-leg add"></i>仅对方有</span>
+            ${fragmentMode ? '<span class="pmp18-legend-item"><i class="pmp18-leg share"></i>共同片段（跨结构）</span>' : ''}
+            <span class="pmp18-legend-note">${fragmentMode ? '当前为跨结构/低相似模式：先标共同片段，再通读全文。' : '按章节对齐；粉=删、绿=增。'}</span>
+        </div>`;
+}
+
 /* ---------- UI lists ---------- */
 
 function renderCard(persona, all) {
     const checked = state.selected.has(persona.id);
+    const sub = formatPersonaSubline(persona);
     return `
         <article class="pmp18-card ${checked ? 'is-selected' : ''}" data-persona-id="${escapeHtml(persona.id)}">
             <label class="pmp18-check">
@@ -549,10 +700,11 @@ function renderCard(persona, all) {
                     <div class="pmp18-card-name">${escapeHtml(persona.name)}</div>
                     ${statusBadge(persona, all)}
                 </div>
-                <div class="pmp18-card-id">ID：${escapeHtml(persona.id)}</div>
+                <div class="pmp18-card-sub" title="${escapeHtml(persona.title ? `备注：${persona.title}` : `ID：${persona.id}`)}">${escapeHtml(sub)}</div>
                 <div class="pmp18-card-description">${persona.description ? escapeHtml(persona.description) : '<span class="pmp18-muted">暂无描述</span>'}</div>
                 <div class="pmp18-card-actions">
                     <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(persona.id)}"><i class="fa-solid fa-pen"></i> 编辑</button>
+                    <button type="button" class="pmp18-small-btn pmp18-danger-btn" data-action="delete-persona" data-id="${escapeHtml(persona.id)}"><i class="fa-solid fa-trash"></i> 删除</button>
                 </div>
             </div>
         </article>`;
@@ -633,14 +785,19 @@ function renderCompareWorkspace(personas) {
     if (!base || !other) return emptyState('对比数据无效', '');
 
     const score = similarity(base.description, other.description);
-    const stats = countPairStats(unorderedDiff(base.description, other.description));
+    const fragmentMode = shouldUseFragmentMode(base.description, other.description, score);
+    const stats = fragmentMode
+        ? { same: extractSharedSnippets(base.description, other.description).length, replace: 0, remove: 0, add: 0 }
+        : countPairStats(unorderedDiff(base.description, other.description));
     const mode = diffModeClass(score);
     const showDiffOnly = state.settings.showDiffOnly;
+    const frag = fragmentMode ? renderFragmentCompare(base.description, other.description) : null;
 
     const baselineBtns = ids.map(id => {
         const p = personas.find(x => x.id === id);
         if (!p) return '';
-        return `<button type="button" class="pmp18-base-btn ${id === state.baselineId ? 'is-active' : ''}" data-action="set-baseline" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
+        const sub = formatPersonaSubline(p);
+        return `<button type="button" class="pmp18-base-btn ${id === state.baselineId ? 'is-active' : ''}" data-action="set-baseline" data-id="${escapeHtml(id)}" title="${escapeHtml(sub)}">${escapeHtml(p.name)}<small>${escapeHtml(sub)}</small></button>`;
     }).join('');
 
     const otherCards = others.map(id => {
@@ -648,15 +805,27 @@ function renderCompareWorkspace(personas) {
         if (!p) return '';
         const sc = Math.round(similarity(base.description, p.description) * 100);
         const on = id === state.focusOtherId;
+        const sub = formatPersonaSubline(p);
         return `
             <button type="button" class="pmp18-other-card ${on ? 'is-active' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}">
                 ${renderAvatar(p)}
                 <div class="pmp18-other-card-meta">
                     <strong title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</strong>
-                    <span>${sc}%</span>
+                    <span>${escapeHtml(sub)} · ${sc}%</span>
                 </div>
             </button>`;
     }).join('');
+
+    const baseBody = fragmentMode
+        ? frag.baseHtml
+        : renderFocusBlocks(base.description, other.description, 'base', showDiffOnly);
+    const otherBody = fragmentMode
+        ? frag.otherHtml
+        : renderFocusBlocks(base.description, other.description, 'other', showDiffOnly);
+
+    const metaLine = fragmentMode
+        ? `${Math.round(score * 100)}% · 跨结构模式 · 共同片段 ${stats.same}`
+        : `${Math.round(score * 100)}% · 同 ${stats.same} · 改 ${stats.replace} · 仅基准 ${stats.remove} · 仅对方 ${stats.add}`;
 
     return `
         <div class="pmp18-compare-workspace">
@@ -664,10 +833,10 @@ function renderCompareWorkspace(personas) {
                 <button type="button" class="pmp18-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回</button>
                 <div class="pmp18-compare-title">
                     <strong>对比</strong>
-                    <span>点选下方对象卡查看与基准的细比 · 同屏不跳转</span>
+                    <span>点选对象卡细比 · 备注/标题用于区分同名</span>
                 </div>
                 <div class="pmp18-compare-tools">
-                    <button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>
+                    ${fragmentMode ? '' : `<button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>`}
                     <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}">编辑基准</button>
                     <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(other.id)}">编辑对方</button>
                 </div>
@@ -680,28 +849,40 @@ function renderCompareWorkspace(personas) {
                 <span class="pmp18-baseline-label">对象</span>
                 <div class="pmp18-others-scroll">${otherCards}</div>
             </div>
+            ${renderCompareLegend(fragmentMode)}
+            ${fragmentMode ? frag.sharePanel : ''}
             <div class="pmp18-detail-meta">
-                <strong>${escapeHtml(base.name)}</strong> ↔ <strong>${escapeHtml(other.name)}</strong>
-                <span>${Math.round(score * 100)}% · 同 ${stats.same} · 改 ${stats.replace} · 仅基准 ${stats.remove} · 仅对方 ${stats.add}</span>
+                <strong>${escapeHtml(base.name)}</strong>
+                <span class="pmp18-muted">${escapeHtml(formatPersonaSubline(base))}</span>
+                ↔
+                <strong>${escapeHtml(other.name)}</strong>
+                <span class="pmp18-muted">${escapeHtml(formatPersonaSubline(other))}</span>
+                <span>${metaLine}</span>
             </div>
             <div class="pmp18-focus-wrap ${mode}">
                 <section class="pmp18-hcol pmp18-hcol-base">
                     <div class="pmp18-hcol-head">
                         <div class="pmp18-pair-person">
                             ${renderAvatar(base)}
-                            <div><strong>${escapeHtml(base.name)}</strong><span>基准</span></div>
+                            <div>
+                                <strong>${escapeHtml(base.name)}</strong>
+                                <span>基准 · ${escapeHtml(formatPersonaSubline(base))}</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="pmp18-hcol-body">${renderFocusBlocks(base.description, other.description, 'base', showDiffOnly)}</div>
+                    <div class="pmp18-hcol-body">${baseBody}</div>
                 </section>
                 <section class="pmp18-hcol pmp18-hcol-other">
                     <div class="pmp18-hcol-head">
                         <div class="pmp18-pair-person">
                             ${renderAvatar(other)}
-                            <div><strong>${escapeHtml(other.name)}</strong><span>对方</span></div>
+                            <div>
+                                <strong>${escapeHtml(other.name)}</strong>
+                                <span>对方 · ${escapeHtml(formatPersonaSubline(other))}</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="pmp18-hcol-body">${renderFocusBlocks(base.description, other.description, 'other', showDiffOnly)}</div>
+                    <div class="pmp18-hcol-body">${otherBody}</div>
                 </section>
             </div>
         </div>`;
@@ -1138,6 +1319,19 @@ function ensureRoot() {
         }
         if (action === 'edit-full') {
             openFullEditor(String(target.dataset.id || ''));
+            return;
+        }
+        if (action === 'delete-persona') {
+            const id = String(target.dataset.id || '');
+            const p = getPersonaData().find(x => x.id === id);
+            const label = p ? `${p.name}${p.title ? `（${p.title}）` : ''}` : id;
+            if (!window.confirm(`确定删除人设「${label}」？\nID: ${id}\n\n此操作会从酒馆数据中移除该 Persona（不可自动恢复）。`)) return;
+            if (deletePersonaById(id)) {
+                if (typeof toastr !== 'undefined') toastr.success(`已删除：${label}`);
+                renderManager();
+            } else if (typeof toastr !== 'undefined') {
+                toastr.error('删除失败');
+            }
             return;
         }
         if (action === 'check-update') {

@@ -1,23 +1,8 @@
-# Persona Manager v1.8.8
+# Persona Manager v1.8.10
 
-## 本版
+- 用 **Persona 备注/标题** 作小字区分（无备注时显示短 ID）
+- 低相似或散文 vs 字段结构时：共同片段高亮
+- 列表可 **删除** 人设（需确认）
+- 对比界面显示区块图例
 
-- **对比对齐**：小标题与正文合并为节再匹配；同标题优先对齐，减少「仅基准」误标。
-- **多对比**：对象卡横滑总览；点击某对象卡，同屏显示与基准的细比（选中态高亮）。
-- **更新日志**：弹窗**只显示** `CHANGELOG.md` 中最新一个 `##` 版本节。
-
-## 安装
-
-```
-third-party/persona-manager/
-  index.js
-  style.css
-  manifest.json
-  README.md
-```
-
-仓库根目录需有 `CHANGELOG.md`（与 manifest 同级）。
-
-## 版本
-
-v1.8.8
+安装目录：`third-party/persona-manager/` 下直接放四个运行文件。
