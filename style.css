@@ -866,3 +866,90 @@ mark.pmp18-share {
     white-space: pre-wrap;
     line-height: 1.65;
 }
+
+
+/* ===== v1.8.11 Mobile Patch ===== */
+.pmp18-entry,
+.pmp18-entry-float {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    pointer-events: auto !important;
+}
+
+.pmp18-window {
+    max-width: 100vw;
+}
+
+@media (max-width: 700px) {
+    #pmp18-root {
+        position: fixed;
+        inset: 0;
+    }
+
+    .pmp18-window {
+        inset: 0 !important;
+        border-radius: 0;
+    }
+
+    .pmp18-header {
+        min-height: 56px;
+        padding: 10px 14px;
+    }
+
+    .pmp18-brand h1 {
+        font-size: 18px;
+    }
+
+    .pmp18-toolbar {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 10px;
+    }
+
+    .pmp18-search {
+        width: 100%;
+        flex: none;
+    }
+
+    .pmp18-stats {
+        width: 100%;
+        gap: 8px;
+        justify-content: flex-start;
+    }
+
+    .pmp18-tabs {
+        overflow-x: auto;
+        padding: 6px 10px;
+    }
+
+    .pmp18-content {
+        padding: 12px 10px 80px;
+    }
+
+    .pmp18-grid,
+    .pmp18-list,
+    .pmp18-cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+    }
+
+    .pmp18-entry-float {
+        right: 12px;
+        bottom: 70px;
+        z-index: 999999 !important;
+    }
+
+    .pmp18-entry {
+        z-index: 999999 !important;
+    }
+}
+
+@media (max-width: 380px) {
+    .pmp18-grid,
+    .pmp18-list,
+    .pmp18-cards {
+        grid-template-columns: 1fr !important;
+    }
+}
