@@ -1,5 +1,5 @@
 /**
- * Persona Manager v1.8.7
+ * Persona Manager v1.8.8
  * - Fix list-edit writing into the wrong persona
  * - Focus compare: baseline + one other (switchable)
  * - Remote CHANGELOG.md for update notes
@@ -9,7 +9,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.7';
+const VERSION = '1.8.8';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -277,34 +277,68 @@ function statusBadge(persona, all) {
 
 /* ---------- Diff engine ---------- */
 
+/** Short heading line: section title, not a long prose sentence */
+function isSectionTitleLine(line) {
+    const t = String(line || '').trim();
+    if (!t || t.length > 36) return false;
+    if (/^#{1,6}\s/.test(t)) return true;
+    if (/[:：]\s*$/.test(t) && t.length <= 24) return true;
+    if (/^\s*[\w\u4e00-\u9fff./_-]{1,20}\s*[:：]/.test(t) && t.length <= 28) return true;
+    // Bare short labels without ending punctuation (e.g. 五官细节 / 女)
+    if (t.length <= 16 && !/[。！？；;,.!?]$/.test(t) && !/\s{2,}/.test(t)) return true;
+    return false;
+}
+
+/**
+ * Split into sections: title line merges with following body until next title.
+ * Avoids "仅基准: 发型与发色" while body text exists on both sides unmatched.
+ */
 function splitUnits(text) {
     const raw = String(text || '').replace(/\r\n?/g, '\n');
     if (!raw.trim()) return [];
     const lines = raw.split('\n');
-    const fieldRe = /^\s*[\w\u4e00-\u9fff./_-]+\s*[:：]/;
-    const nonEmpty = lines.filter(l => l.trim());
-    const fieldCount = nonEmpty.filter(l => fieldRe.test(l)).length;
-    const useFields = fieldCount >= 3 && fieldCount / Math.max(nonEmpty.length, 1) >= 0.35;
 
-    if (useFields) {
-        const units = [];
-        let buf = [];
-        const flush = () => {
-            const t = buf.join('\n').trim();
-            if (t) units.push(t);
-            buf = [];
-        };
-        for (const line of lines) {
-            if (fieldRe.test(line) && buf.length) flush();
-            buf.push(line);
+    const units = [];
+    let buf = [];
+    const flush = () => {
+        const t = buf.join('\n').trim();
+        if (t) units.push(t);
+        buf = [];
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        if (!trimmed) {
+            // blank line: if buffer has content and next is a title, flush
+            if (buf.length && i + 1 < lines.length && isSectionTitleLine(lines[i + 1])) {
+                flush();
+            } else if (buf.length) {
+                buf.push(line);
+            }
+            continue;
         }
-        flush();
-        return units.length ? units : [raw.trim()];
+        if (isSectionTitleLine(line) && buf.length) {
+            flush();
+            buf.push(line);
+            continue;
+        }
+        buf.push(line);
     }
+    flush();
 
+    if (units.length >= 2) return units;
+
+    // Fallback: paragraphs then lines
     let parts = raw.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
     if (parts.length <= 1) parts = lines.map(s => s.trim()).filter(Boolean);
-    return parts;
+    return parts.length ? parts : [raw.trim()];
+}
+
+/** Prefer matching units that share the same first-line title */
+function unitTitleKey(unit) {
+    const first = String(unit || '').split('\n').map(s => s.trim()).find(Boolean) || '';
+    return normalizeText(first.replace(/[:：]\s*$/, '')).slice(0, 24);
 }
 
 function tokenize(text) {
@@ -379,7 +413,25 @@ function unorderedDiff(aText, bText) {
     const pairs = [];
     const soft = state.settings.softMatchThreshold ?? 0.35;
 
+    // Pass 0: same section title key (e.g. 发型与发色 / 五官细节)
     for (let i = 0; i < aUnits.length; i++) {
+        const ta = unitTitleKey(aUnits[i]);
+        if (!ta) continue;
+        for (let j = 0; j < bUnits.length; j++) {
+            if (usedB.has(j)) continue;
+            if (unitTitleKey(bUnits[j]) === ta) {
+                const s = similarity(aUnits[i], bUnits[j]);
+                const type = s >= 0.92 || normalizeText(aUnits[i]) === normalizeText(bUnits[j]) ? 'same' : 'replace';
+                pairs.push({ type, a: aUnits[i], b: bUnits[j], ai: i, bj: j, matched: true });
+                usedB.add(j);
+                break;
+            }
+        }
+    }
+
+    // Pass 1: exact full-unit match for remaining
+    for (let i = 0; i < aUnits.length; i++) {
+        if (pairs.some(p => p.ai === i)) continue;
         const na = normalizeText(aUnits[i]);
         let matched = false;
         for (let j = 0; j < bUnits.length; j++) {
@@ -394,6 +446,7 @@ function unorderedDiff(aText, bText) {
         if (!matched) pairs.push({ type: 'pending', a: aUnits[i], b: null, ai: i, bj: -1 });
     }
 
+    // Pass 2: best similarity for pending
     for (const p of pairs) {
         if (p.type !== 'pending') continue;
         let bestJ = -1;
@@ -562,7 +615,7 @@ function renderSimilarView(personas) {
         </section>`).join('')}</div>`;
 }
 
-/** Focus compare: baseline + one other */
+/** Multi overview cards + in-place detail vs baseline (same screen) */
 function renderCompareWorkspace(personas) {
     const ids = state.compareIds.filter(id => personas.some(p => p.id === id));
     if (ids.length < 2) {
@@ -590,10 +643,19 @@ function renderCompareWorkspace(personas) {
         return `<button type="button" class="pmp18-base-btn ${id === state.baselineId ? 'is-active' : ''}" data-action="set-baseline" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
     }).join('');
 
-    const otherBtns = others.map(id => {
+    const otherCards = others.map(id => {
         const p = personas.find(x => x.id === id);
         if (!p) return '';
-        return `<button type="button" class="pmp18-base-btn ${id === state.focusOtherId ? 'is-active' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
+        const sc = Math.round(similarity(base.description, p.description) * 100);
+        const on = id === state.focusOtherId;
+        return `
+            <button type="button" class="pmp18-other-card ${on ? 'is-active' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}">
+                ${renderAvatar(p)}
+                <div class="pmp18-other-card-meta">
+                    <strong title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</strong>
+                    <span>${sc}%</span>
+                </div>
+            </button>`;
     }).join('');
 
     return `
@@ -601,8 +663,8 @@ function renderCompareWorkspace(personas) {
             <div class="pmp18-compare-topbar">
                 <button type="button" class="pmp18-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回</button>
                 <div class="pmp18-compare-title">
-                    <strong>细比 · ${Math.round(score * 100)}%</strong>
-                    <span>同 ${stats.same} · 改 ${stats.replace} · 仅基准 ${stats.remove} · 仅对方 ${stats.add}</span>
+                    <strong>对比</strong>
+                    <span>点选下方对象卡查看与基准的细比 · 同屏不跳转</span>
                 </div>
                 <div class="pmp18-compare-tools">
                     <button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>
@@ -614,9 +676,13 @@ function renderCompareWorkspace(personas) {
                 <span class="pmp18-baseline-label">基准</span>
                 <div class="pmp18-baseline-list">${baselineBtns}</div>
             </div>
-            <div class="pmp18-baseline-bar">
-                <span class="pmp18-baseline-label">对方</span>
-                <div class="pmp18-baseline-list">${otherBtns}</div>
+            <div class="pmp18-others-strip">
+                <span class="pmp18-baseline-label">对象</span>
+                <div class="pmp18-others-scroll">${otherCards}</div>
+            </div>
+            <div class="pmp18-detail-meta">
+                <strong>${escapeHtml(base.name)}</strong> ↔ <strong>${escapeHtml(other.name)}</strong>
+                <span>${Math.round(score * 100)}% · 同 ${stats.same} · 改 ${stats.replace} · 仅基准 ${stats.remove} · 仅对方 ${stats.add}</span>
             </div>
             <div class="pmp18-focus-wrap ${mode}">
                 <section class="pmp18-hcol pmp18-hcol-base">
@@ -877,9 +943,24 @@ async function checkForUpdates() {
     return state.updateInfo;
 }
 
+/** Only the first ## section of CHANGELOG.md (latest version). */
+function extractLatestChangelogSection(md) {
+    const text = String(md || '').replace(/^\uFEFF/, '').trim();
+    if (!text) return '（无日志）';
+    const headingRe = /^##\s+.+$/gm;
+    const matches = [...text.matchAll(headingRe)];
+    if (!matches.length) {
+        // No ## headings: return whole file but cap length
+        return text.length > 4000 ? `${text.slice(0, 4000)}\n…` : text;
+    }
+    const start = matches[0].index;
+    const end = matches[1] ? matches[1].index : text.length;
+    return text.slice(start, end).trim();
+}
+
 function showUpdateModal() {
     const info = state.updateInfo || {};
-    const log = info.changelog || '暂无日志。请确认仓库中存在 CHANGELOG.md。';
+    const log = extractLatestChangelogSection(info.changelog || '');
     const available = Boolean(info.available);
     const overlay = document.createElement('div');
     overlay.className = 'pmp18-editor-overlay';

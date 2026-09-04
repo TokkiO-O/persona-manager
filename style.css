@@ -336,6 +336,58 @@ body.pmp18-open { overflow: hidden !important; }
     font-weight: 600;
 }
 
+/* Object strip: horizontal cards, click to focus detail */
+.pmp18-others-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    flex: 0 0 auto;
+}
+.pmp18-others-scroll {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+}
+.pmp18-other-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    min-width: 140px;
+    max-width: 200px;
+    padding: 8px 10px;
+    border: 1px solid rgba(127,127,127,.2);
+    border-radius: 12px;
+    background: rgba(127,127,127,.05);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+.pmp18-other-card:hover { border-color: rgba(255,138,98,.4); }
+.pmp18-other-card.is-active {
+    border-color: rgba(255,138,98,.65);
+    background: rgba(255,138,98,.14);
+    box-shadow: 0 0 0 1px rgba(255,138,98,.25);
+}
+.pmp18-other-card .pmp18-avatar { width: 36px; height: 36px; flex-basis: 36px; }
+.pmp18-other-card-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pmp18-other-card-meta strong {
+    font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pmp18-other-card-meta span { font-size: 11px; opacity: .55; }
+.pmp18-detail-meta {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 8px 20px 0; font-size: 13px;
+}
+.pmp18-detail-meta span { font-size: 11px; opacity: .55; }
+
 /* Focus compare: two equal columns */
 .pmp18-focus-wrap {
     flex: 1;

@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.8.7",
-  "description": "Persona 管理：修复列表编辑串改、单对方细比、远程 CHANGELOG、更新反馈与强制刷新。",
+  "version": "1.8.8",
+  "description": "Persona 管理：节标题合并对齐、多对象横滑点选细比、更新日志仅显示最新版本。",
   "hooks": {
     "update": "onUpdate"
   }
