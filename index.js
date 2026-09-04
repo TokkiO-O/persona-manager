@@ -15,7 +15,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.1';
+const VERSION = '1.8.2';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -465,54 +465,37 @@ function renderDiffBlock(row, layout, showDiffOnly) {
     </div>`;
 }
 
-function renderOnePair(base, other, layout, showDiffOnly) {
-    const score = similarity(base.description, other.description);
-    const rows = unorderedDiff(base.description, other.description);
-    const stats = countPairStats(rows);
-    const mode = diffModeClass(score);
-    const body = rows.map(r => renderDiffBlock(r, layout, showDiffOnly)).join('');
-
-    return `
-        <section class="pmp18-pair ${mode}" data-pair-other="${escapeHtml(other.id)}">
-            <div class="pmp18-pair-head">
-                <div class="pmp18-pair-titles">
-                    <div class="pmp18-pair-person">
-                        ${renderAvatar(base)}
-                        <div>
-                            <strong>${escapeHtml(base.name)}</strong>
-                            <span>基准</span>
-                        </div>
-                    </div>
-                    <div class="pmp18-pair-vs">↔</div>
-                    <div class="pmp18-pair-person">
-                        ${renderAvatar(other)}
-                        <div>
-                            <strong>${escapeHtml(other.name)}</strong>
-                            <span>对比</span>
-                        </div>
-                        <button type="button" class="pmp18-icon-btn" data-action="edit-persona" data-id="${escapeHtml(other.id)}" title="编辑此 Persona 描述">
-                            <i class="fa-solid fa-pen"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="pmp18-pair-meta">
-                    <div class="pmp18-pair-score"><b>${Math.round(score * 100)}</b><small>%</small></div>
-                    <div class="pmp18-pair-stats">
-                        <span>相同 ${stats.same}</span>
-                        <span>修改 ${stats.replace}</span>
-                        <span>基准独有 ${stats.remove}</span>
-                        <span>对方独有 ${stats.add}</span>
-                    </div>
-                </div>
-            </div>
-            ${layout === 'side' ? `
-                <div class="pmp18-side-header">
-                    <div>${escapeHtml(base.name)}</div>
-                    <div>${escapeHtml(other.name)}</div>
-                </div>
-            ` : `<div class="pmp18-rev-hint">以「${escapeHtml(base.name)}」为基准的修订视图 · 红=删除 · 绿=新增</div>`}
-            <div class="pmp18-pair-body ${layout}">${body || '<div class="pmp18-muted" style="padding:16px">无差异或已全部过滤</div>'}</div>
-        </section>`;
+function renderColumnBody(baseText, otherText, layout, showDiffOnly, isBaselineOnly) {
+    if (isBaselineOnly) {
+        const units = splitUnits(baseText);
+        if (!units.length) return '<div class="pmp18-muted" style="padding:12px">（无描述）</div>';
+        return units.map(u => `<div class="pmp18-col-block">${escapeHtml(u)}</div>`).join('');
+    }
+    // Single-column relative to baseline (works for both "side highlight" and "revision")
+    const rows = unorderedDiff(baseText, otherText);
+    const parts = [];
+    for (const row of rows) {
+        if (showDiffOnly && row.type === 'same') continue;
+        if (row.type === 'same') {
+            parts.push(`<div class="pmp18-col-block same">${escapeHtml(row.b || row.a)}</div>`);
+        } else if (row.type === 'remove') {
+            // present in baseline only — show as deleted reference in other column
+            parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">基准有</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
+        } else if (row.type === 'add') {
+            parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">对方有</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
+        } else {
+            const { left, right } = inlineDiffHtml(row.a, row.b);
+            if (layout === 'revision') {
+                parts.push(`<div class="pmp18-col-block replace">
+                    <div class="pmp18-rev-line"><span class="pmp18-tag">基准</span>${left}</div>
+                    <div class="pmp18-rev-line"><span class="pmp18-tag">对方</span>${right}</div>
+                </div>`);
+            } else {
+                parts.push(`<div class="pmp18-col-block replace">${right || left}</div>`);
+            }
+        }
+    }
+    return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无差异或已全部过滤</div>';
 }
 
 function renderCompareWorkspace(personas) {
@@ -539,27 +522,69 @@ function renderCompareWorkspace(personas) {
         return `<button type="button" class="pmp18-base-btn ${active}" data-action="set-baseline" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
     }).join('');
 
+    // Fixed baseline column + horizontal scrollable others
+    const otherCols = others.map(o => {
+        const score = similarity(base.description, o.description);
+        const rows = unorderedDiff(base.description, o.description);
+        const stats = countPairStats(rows);
+        const mode = diffModeClass(score);
+        return `
+            <section class="pmp18-hcol pmp18-hcol-other ${mode}" data-pair-other="${escapeHtml(o.id)}">
+                <div class="pmp18-hcol-head">
+                    <div class="pmp18-pair-person">
+                        ${renderAvatar(o)}
+                        <div>
+                            <strong title="${escapeHtml(o.name)}">${escapeHtml(o.name)}</strong>
+                            <span>对比 · ${Math.round(score * 100)}%</span>
+                        </div>
+                        <button type="button" class="pmp18-icon-btn" data-action="edit-persona" data-id="${escapeHtml(o.id)}" title="编辑"><i class="fa-solid fa-pen"></i></button>
+                    </div>
+                    <div class="pmp18-pair-stats">
+                        <span>同 ${stats.same}</span>
+                        <span>改 ${stats.replace}</span>
+                        <span>− ${stats.remove}</span>
+                        <span>+ ${stats.add}</span>
+                    </div>
+                </div>
+                <div class="pmp18-hcol-body">${renderColumnBody(base.description, o.description, layout, showDiffOnly, false)}</div>
+            </section>`;
+    }).join('');
+
     return `
         <div class="pmp18-compare-workspace">
             <div class="pmp18-compare-topbar">
                 <button type="button" class="pmp18-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回列表</button>
                 <div class="pmp18-compare-title">
                     <strong>Persona 对比</strong>
-                    <span>共 ${ids.length} 个 · 当前基准可随时切换</span>
+                    <span>共 ${ids.length} 个 · 左侧基准固定 · 右侧可左右滑动</span>
                 </div>
                 <div class="pmp18-compare-tools">
-                    <button type="button" class="pmp18-small-btn ${layout === 'side' ? 'is-on' : ''}" data-action="set-layout" data-layout="side" title="左右并排">并排</button>
-                    <button type="button" class="pmp18-small-btn ${layout === 'revision' ? 'is-on' : ''}" data-action="set-layout" data-layout="revision" title="修订视图">修订</button>
-                    <button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only" title="只显示差异">只看差异</button>
-                    <button type="button" class="pmp18-small-btn" data-action="edit-persona" data-id="${escapeHtml(base.id)}" title="编辑基准描述"><i class="fa-solid fa-pen"></i> 编辑基准</button>
+                    <button type="button" class="pmp18-small-btn ${layout === 'side' ? 'is-on' : ''}" data-action="set-layout" data-layout="side">并排高亮</button>
+                    <button type="button" class="pmp18-small-btn ${layout === 'revision' ? 'is-on' : ''}" data-action="set-layout" data-layout="revision">修订高亮</button>
+                    <button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>
+                    <button type="button" class="pmp18-small-btn" data-action="edit-persona" data-id="${escapeHtml(base.id)}"><i class="fa-solid fa-pen"></i> 编辑基准</button>
                 </div>
             </div>
             <div class="pmp18-baseline-bar">
                 <span class="pmp18-baseline-label">基准：</span>
                 <div class="pmp18-baseline-list">${baselineButtons}</div>
             </div>
-            <div class="pmp18-pairs">
-                ${others.map(o => renderOnePair(base, o, layout, showDiffOnly)).join('')}
+            <div class="pmp18-hscroll-wrap">
+                <section class="pmp18-hcol pmp18-hcol-base">
+                    <div class="pmp18-hcol-head">
+                        <div class="pmp18-pair-person">
+                            ${renderAvatar(base)}
+                            <div>
+                                <strong title="${escapeHtml(base.name)}">${escapeHtml(base.name)}</strong>
+                                <span>基准（固定）</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pmp18-hcol-body">${renderColumnBody(base.description, '', layout, false, true)}</div>
+                </section>
+                <div class="pmp18-hscroll">
+                    ${otherCols}
+                </div>
             </div>
         </div>`;
 }
@@ -875,42 +900,42 @@ function isVisible(el) {
 }
 
 function findEntryAnchor() {
-    // 1) Prefer known ST persona / settings containers
-    const knownSelectors = [
-        '.persona_management_global_settings',
-        '#persona-management-block',
-        '#user-settings-block',
-        '.persona_management',
-        '#rm_api_block',
+    // 1) Hard anchors from real ST DOM (may be inside closed drawers — still mount)
+    const hardIds = [
+        'persona-management-block',
+        'user-settings-block-content',
+        'user-settings-block',
     ];
-    for (const sel of knownSelectors) {
-        const node = document.querySelector(sel);
-        if (node && isVisible(node)) return { type: 'container', node };
+    for (const id of hardIds) {
+        const node = document.getElementById(id);
+        if (node) return { type: 'container', node, id };
     }
 
-    // 2) Text match (exact or contains) on common heading-like nodes
+    const hardClass = document.querySelector(
+        '.persona_management_left_column, .persona_management_global_settings, #persona-management-block'
+    );
+    if (hardClass) return { type: 'container', node: hardClass };
+
+    // 2) H3/标题「用户设置」
+    const headings = document.querySelectorAll('h3,h2,h4,.inline-drawer-header');
+    for (const el of headings) {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text === '用户设置' || text === 'User Settings' || text === '全局设置' || text === 'Global Settings') {
+            return { type: 'heading', node: el };
+        }
+    }
+
+    // 3) Text match on short labels
     const elements = document.querySelectorAll(
-        'h1,h2,h3,h4,h5,h6,legend,label,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span,b,strong'
+        'h1,h2,h3,h4,h5,h6,legend,label,.inline-drawer-header,.menu_section_header,span,div'
     );
     for (const element of elements) {
         if (element.dataset?.pmp18 === ENTRY_MARK) continue;
         if (element.children.length > 5) continue;
         const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!text || text.length > 40) continue;
-        const hit = ENTRY_TEXTS.some(t => text === t || text.includes(t));
-        if (!hit) continue;
-        if (!isVisible(element)) continue;
+        if (!text || text.length > 24) continue;
+        if (!ENTRY_TEXTS.some(t => text === t || text.includes(t))) continue;
         return { type: 'heading', node: element };
-    }
-
-    // 3) Any open drawer / right panel that looks like settings
-    const drawers = document.querySelectorAll('.drawer-content, .inline-drawer-content, #right-nav-panel, #left-nav-panel');
-    for (const d of drawers) {
-        if (!isVisible(d)) continue;
-        const t = (d.textContent || '').slice(0, 500);
-        if (/全局设置|Global Settings|Persona|用户设置|User Settings/i.test(t)) {
-            return { type: 'container', node: d };
-        }
     }
 
     return null;
@@ -939,10 +964,10 @@ function injectEntry() {
         if (anchor.type === 'heading' && anchor.node.parentNode) {
             anchor.node.parentNode.insertBefore(btn, anchor.node);
         } else {
-            // container: prepend so it is visible near the top
+            // Prefer top of persona-management-block / user-settings content
             anchor.node.insertBefore(btn, anchor.node.firstChild);
         }
-        console.log(`[${EXT}] 入口已挂载 (${anchor.type})`);
+        console.log(`[${EXT}] 入口已挂载 (${anchor.type}${anchor.id ? ' #' + anchor.id : ''})`);
         return true;
     }
     return false;
@@ -962,20 +987,24 @@ function injectFloatingEntry() {
 function installEntryObserver() {
     if (window.__pmp18Observer) return;
 
-    // Always expose manual opener
     window.openPersonaManager = () => openManager('all');
 
     let ticks = 0;
+    let floatingDone = false;
+
     const tryInject = () => {
+        // If floating exists but panel is now available, upgrade to panel button
+        const existing = document.getElementById(BUTTON_ID);
+        if (existing && !existing.classList.contains('pmp18-entry-float')) return true;
+        if (existing?.classList.contains('pmp18-entry-float')) {
+            const anchor = findEntryAnchor();
+            if (anchor?.node) {
+                existing.remove();
+            } else {
+                return true;
+            }
+        }
         if (injectEntry()) {
-            if (window.__pmp18Observer) {
-                window.__pmp18Observer.disconnect();
-                window.__pmp18Observer = null;
-            }
-            if (window.__pmp18EntryTimer) {
-                clearInterval(window.__pmp18EntryTimer);
-                window.__pmp18EntryTimer = null;
-            }
             return true;
         }
         return false;
@@ -987,20 +1016,23 @@ function installEntryObserver() {
     window.__pmp18Observer = observer;
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Keep trying for a while; if still nothing, fall back to floating button
+    // Also re-try when user opens user-settings / persona drawers
+    document.addEventListener('click', () => {
+        setTimeout(tryInject, 150);
+        setTimeout(tryInject, 500);
+    }, true);
+
     window.__pmp18EntryTimer = setInterval(() => {
         ticks += 1;
-        if (tryInject()) return;
-        if (ticks >= 25) {
-            clearInterval(window.__pmp18EntryTimer);
-            window.__pmp18EntryTimer = null;
-            if (window.__pmp18Observer) {
-                window.__pmp18Observer.disconnect();
-                window.__pmp18Observer = null;
-            }
+        if (tryInject()) {
+            // keep observer: drawer may re-render and wipe the button
+            return;
+        }
+        if (!floatingDone && ticks >= 20) {
+            floatingDone = true;
             injectFloatingEntry();
         }
-    }, 400);
+    }, 500);
 }
 
 function installKeyboardHandler() {

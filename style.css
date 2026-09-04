@@ -336,6 +336,93 @@ body.pmp18-open { overflow: hidden !important; }
     font-weight: 600;
 }
 
+/* Horizontal multi-compare: fixed baseline + scrollable others */
+.pmp18-hscroll-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    padding: 12px 14px 16px;
+    gap: 0;
+}
+.pmp18-hcol {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid rgba(127,127,127,.16);
+    background: rgba(127,127,127,.02);
+    overflow: hidden;
+}
+.pmp18-hcol-base {
+    flex: 0 0 min(340px, 38vw);
+    max-width: 420px;
+    border-radius: 12px 0 0 12px;
+    border-right: 2px solid rgba(255,138,98,.35);
+    z-index: 2;
+}
+.pmp18-hscroll {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 0;
+    -webkit-overflow-scrolling: touch;
+}
+.pmp18-hcol-other {
+    flex: 0 0 min(360px, 42vw);
+    max-width: 480px;
+    border-left: none;
+    border-radius: 0;
+}
+.pmp18-hcol-other:last-child { border-radius: 0 12px 12px 0; }
+.pmp18-hcol-head {
+    flex: 0 0 auto;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(127,127,127,.1);
+    background: rgba(127,127,127,.04);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.pmp18-hcol-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 10px 14px;
+    font-size: 13px;
+    line-height: 1.65;
+    -webkit-overflow-scrolling: touch;
+}
+.pmp18-col-block {
+    padding: 8px 8px;
+    margin-bottom: 4px;
+    border-radius: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.pmp18-col-block.same { opacity: .7; }
+.pmp18-col-block.remove { background: rgba(235,105,105,.07); }
+.pmp18-col-block.add { background: rgba(88,178,126,.07); }
+.pmp18-col-block.replace { background: rgba(255,183,77,.07); }
+.pmp18-tag {
+    display: inline-block;
+    font-size: 10px;
+    opacity: .5;
+    margin-right: 6px;
+    font-weight: 600;
+}
+.pmp18-rev-line { margin-bottom: 4px; }
+.pmp18-hcol.mode-high .pmp18-col-block.same { opacity: .28; }
+.pmp18-hcol.mode-low .pmp18-col-block.same { opacity: 1; background: rgba(127,127,127,.08); }
+.pmp18-hcol.mode-low .pmp18-col-block.remove,
+.pmp18-hcol.mode-low .pmp18-col-block.add,
+.pmp18-hcol.mode-low .pmp18-col-block.replace { opacity: .55; }
+
 .pmp18-pairs {
     flex: 1;
     min-height: 0;
