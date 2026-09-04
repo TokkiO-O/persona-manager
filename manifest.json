@@ -8,6 +8,7 @@
   "author": "xingx121",
   "version": "1.8.11",
   "description": "Persona 管理：备注区分、跨结构共同片段、删除人设、对比图例。",
+  "auto_update": true,
   "hooks": {
     "update": "onUpdate"
   }
