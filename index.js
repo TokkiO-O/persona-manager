@@ -16,6 +16,7 @@
  * - NEW: Adjustable diff sensitivity (soft threshold)
  * - FIX: Save delay and refresh to prevent description loss and lag
  * - FIX: Update check fallback when GitHub API fails (raw manifest)
+ * - FIX: Show local changelog even when already up-to-date
  */
 
 import { power_user } from '../../../power-user.js';
@@ -27,6 +28,16 @@ const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
 const STORAGE_KEY = 'pmp18_settings';
 const UPDATE_STORAGE_KEY = 'pmp18_update_status';
+
+// 内置更新日志（即使 API 无法获取也会显示）
+const CHANGELOG = `## v1.8.3 (2026-09-05)
+- 新增版本更新检测及 NEW 角标
+- 允许同名 Persona 参与相似度检测（开关）
+- 列表页直接编辑 Persona（名称 + 描述）
+- 差异检测敏感度调节（段落匹配阈值）
+- 修复编辑后原生界面描述为空的问题
+- 修复切换 Persona 卡顿问题
+- 更新检测支持备用方案（raw manifest）`;
 
 const defaultSettings = {
     similarityThreshold: 0.55,
@@ -615,7 +626,10 @@ async function checkForUpdates() {
                 const updateInfo = {
                     latestVersion,
                     hasUpdate,
-                    releaseNotes: '由于 GitHub API 限制，无法获取详细更新日志。请点击下方按钮前往 Release 页面查看。',
+                    // 如果版本相同，显示本地日志；否则提示无法获取日志
+                    releaseNotes: hasUpdate
+                        ? '由于 GitHub API 限制，无法获取详细更新日志。请前往 Release 页面查看。'
+                        : CHANGELOG,
                     checkedAt: Date.now()
                 };
                 localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
@@ -630,7 +644,10 @@ async function checkForUpdates() {
         const updateInfo = {
             latestVersion,
             hasUpdate,
-            releaseNotes: data.body || '暂无更新日志',
+            // 如果有更新，使用 API 日志；否则使用本地日志（展示当前版本已更新的内容）
+            releaseNotes: hasUpdate
+                ? (data.body || '暂无更新日志')
+                : CHANGELOG,
             checkedAt: Date.now()
         };
         localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
@@ -645,7 +662,9 @@ async function checkForUpdates() {
             const updateInfo = {
                 latestVersion,
                 hasUpdate,
-                releaseNotes: '无法连接 GitHub API（可能网络限制或 CORS），请手动前往 Release 页面查看。',
+                releaseNotes: hasUpdate
+                    ? '无法连接 GitHub API（可能网络限制或 CORS），请手动前往 Release 页面查看。'
+                    : CHANGELOG,
                 checkedAt: Date.now()
             };
             localStorage.setItem(UPDATE_STORAGE_KEY, JSON.stringify(updateInfo));
@@ -670,23 +689,35 @@ function getUpdateStatus() {
 function showUpdateModal(updateInfo) {
     const overlay = document.createElement('div');
     overlay.className = 'pmp18-editor-overlay pmp18-update-modal';
-    const notes = updateInfo?.releaseNotes || '无更新日志';
-    const latest = updateInfo?.latestVersion || '未知';
+    const notes = updateInfo?.releaseNotes || CHANGELOG;
+    const latest = updateInfo?.latestVersion || VERSION;
+    const hasUpdate = updateInfo?.hasUpdate ?? false;
+
+    let titleHtml, buttonHtml;
+    if (hasUpdate) {
+        titleHtml = `<strong>📦 版本更新</strong><span>当前 v${VERSION} → 最新 v${latest}</span>`;
+        buttonHtml = `
+            <button type="button" class="pmp18-small-btn pmp18-editor-cancel">稍后</button>
+            <a href="https://github.com/xingx121/persona-manager/releases/latest" target="_blank" rel="noopener noreferrer" class="pmp18-primary-btn" style="text-decoration:none;">前往下载</a>
+        `;
+    } else {
+        titleHtml = `<strong>✅ 已是最新版本</strong><span>当前 v${VERSION}</span>`;
+        buttonHtml = `<button type="button" class="pmp18-primary-btn pmp18-editor-cancel">确定</button>`;
+    }
+
     overlay.innerHTML = `
         <div class="pmp18-editor">
             <div class="pmp18-editor-head">
-                <strong>📦 版本更新</strong>
-                <span>当前 v${VERSION} → 最新 v${latest}</span>
+                ${titleHtml}
                 <button type="button" class="pmp18-close pmp18-editor-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="pmp18-editor-body">
                 <div class="pmp18-release-notes">${escapeHtml(notes)}</div>
             </div>
             <div class="pmp18-editor-actions">
-                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">稍后</button>
-                <a href="https://github.com/xingx121/persona-manager/releases/latest" target="_blank" rel="noopener noreferrer" class="pmp18-primary-btn" style="text-decoration:none;">前往下载</a>
+                ${buttonHtml}
             </div>
-            <p class="pmp18-editor-note">点击“前往下载”跳转到 GitHub Release 页面，手动安装或使用扩展管理器更新。</p>
+            ${hasUpdate ? '<p class="pmp18-editor-note">点击“前往下载”跳转到 GitHub Release 页面，手动安装或使用扩展管理器更新。</p>' : ''}
         </div>`;
 
     const close = () => overlay.remove();
