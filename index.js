@@ -10,7 +10,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 const ROOT_ID = 'pmp14-root';
 const BUTTON_ID = 'pmp14-entry';
 const ENTRY_MARK = 'pmp14-entry-installed';
@@ -265,29 +265,112 @@ function inlineDiff(a, b) {
     });
 }
 
-function compareLines(aText, bText) {
-    const aLines = String(aText || '').replace(/\r\n?/g, '\n').split('\n');
-    const bLines = String(bText || '').replace(/\r\n?/g, '\n').split('\n');
-    const diff = lcsDiff(aLines, bLines, (a, b) => normalizeText(a) === normalizeText(b));
-    const rows = [];
-    for (let i = 0; i < diff.length; i++) {
-        const part = diff[i];
-        if (part.type === 'same') {
-            for (let k = 0; k < part.a.length; k++) rows.push({ a: part.a[k], b: part.b[k], type: 'same' });
-        } else if (part.type === 'remove') {
-            for (const line of part.a) rows.push({ a: line, b: '', type: 'remove' });
-        } else if (part.type === 'add') {
-            for (const line of part.b) rows.push({ a: '', b: line, type: 'add' });
+function splitCompareUnits(text) {
+    const normalized = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (!normalized) return [];
+    const lines = normalized.split('\n');
+    const units = [];
+    for (const line of lines) {
+        const value = line.trimEnd();
+        if (!value.trim()) {
+            units.push('');
+            continue;
+        }
+        // Persona 描述通常是“字段/条目”式文本。只有超长单行才进一步按句子拆分，
+        // 避免因为原始条目顺序变化而被错误地判定成删除+新增。
+        if (value.length > 140) {
+            const pieces = value.split(/(?<=[。！？.!?；;])\s+/u).filter(Boolean);
+            if (pieces.length > 1) units.push(...pieces);
+            else units.push(value);
         } else {
-            const count = Math.max(part.a.length, part.b.length);
-            for (let k = 0; k < count; k++) {
-                const left = part.a[k] ?? '';
-                const right = part.b[k] ?? '';
-                const pieces = inlineDiff(left, right);
-                rows.push({ a: pieces.map(p => p.left).join(''), b: pieces.map(p => p.right).join(''), type: left && right ? 'replace' : (left ? 'remove' : 'add') });
-            }
+            units.push(value);
         }
     }
+    return units;
+}
+
+function unitSimilarity(a, b) {
+    const x = normalizeText(a);
+    const y = normalizeText(b);
+    if (!x || !y) return 0;
+    if (x === y) return 1;
+    const shorter = Math.min(x.length, y.length);
+    const longer = Math.max(x.length, y.length);
+    if (!shorter || shorter / longer < 0.12) return 0;
+    return similarity(x, y);
+}
+
+function compareUnordered(aText, bText) {
+    const aUnits = splitCompareUnits(aText);
+    const bUnits = splitCompareUnits(bText);
+    const usedB = new Set();
+    const rows = [];
+
+    // 先精确匹配，完全忽略原始顺序。
+    const exactMap = new Map();
+    bUnits.forEach((unit, index) => {
+        const key = normalizeText(unit);
+        if (!exactMap.has(key)) exactMap.set(key, []);
+        exactMap.get(key).push(index);
+    });
+
+    const unmatchedA = [];
+    for (let ai = 0; ai < aUnits.length; ai++) {
+        const key = normalizeText(aUnits[ai]);
+        const candidates = exactMap.get(key) || [];
+        const bi = candidates.find(index => !usedB.has(index));
+        if (bi !== undefined) {
+            usedB.add(bi);
+            rows.push({ a: aUnits[ai], b: bUnits[bi], type: 'same', score: 1, ai, bi });
+        } else {
+            unmatchedA.push(ai);
+        }
+    }
+
+    // 再对剩余条目做“无序最佳匹配”。这样“同一字段但内容修改”会作为修改，
+    // 而不会因为字段位置不同被判成 A 独有 / B 独有。
+    for (const ai of unmatchedA) {
+        let best = -1;
+        let bestScore = 0;
+        for (let bi = 0; bi < bUnits.length; bi++) {
+            if (usedB.has(bi)) continue;
+            const score = unitSimilarity(aUnits[ai], bUnits[bi]);
+            if (score > bestScore) {
+                bestScore = score;
+                best = bi;
+            }
+        }
+        if (best >= 0 && bestScore >= 0.30) {
+            usedB.add(best);
+            const left = aUnits[ai];
+            const right = bUnits[best];
+            const pieces = inlineDiff(left, right);
+            rows.push({
+                a: pieces.map(part => part.left).join(''),
+                b: pieces.map(part => part.right).join(''),
+                type: 'replace',
+                score: bestScore,
+                ai,
+                bi: best,
+            });
+        } else {
+            rows.push({ a: escapeHtml(aUnits[ai]), b: '', type: 'remove', score: 0, ai, bi: -1 });
+        }
+    }
+
+    // B 中尚未匹配的内容是 B 独有。排序按 B 原始位置，便于阅读。
+    for (let bi = 0; bi < bUnits.length; bi++) {
+        if (usedB.has(bi)) continue;
+        rows.push({ a: '', b: escapeHtml(bUnits[bi]), type: 'add', score: 0, ai: -1, bi });
+    }
+
+    // 以 A 的原始顺序为主，新增项放在对应的 B 顺序区域；最重要的是匹配本身不再依赖位置。
+    rows.sort((x, y) => {
+        const xa = x.ai >= 0 ? x.ai : Number.MAX_SAFE_INTEGER;
+        const ya = y.ai >= 0 ? y.ai : Number.MAX_SAFE_INTEGER;
+        if (xa !== ya) return xa - ya;
+        return (x.bi ?? Number.MAX_SAFE_INTEGER) - (y.bi ?? Number.MAX_SAFE_INTEGER);
+    });
     return rows;
 }
 
@@ -300,46 +383,55 @@ function countChanges(rows) {
     };
 }
 
-function renderCompareWorkspace(personas) {
-    const chosen = state.compareIds.map(id => personas.find(p => p.id === id)).filter(Boolean).slice(0, 2);
-    if (chosen.length < 2) return renderManagerContent(personas);
-
-    const [a, b] = chosen;
+function renderComparePair(a, b, pairIndex, totalPairs) {
     const score = similarity(a.description, b.description);
-    const mode = diffMode(score);
-    const rows = compareLines(a.description, b.description);
+    const rows = compareUnordered(a.description, b.description);
     const counts = countChanges(rows);
     const total = Math.max(rows.length, 1);
     const commonPct = Math.round((counts.common / total) * 100);
+    const mode = diffMode(score);
 
     return `
-        <div class="pmp14-compare-workspace ${mode.key}">
+        <section class="pmp14-multi-pair ${mode.key}" data-compare-pair="${pairIndex}">
+            <div class="pmp14-multi-pair-head">
+                <div class="pmp14-pair-label"><strong>比较 ${pairIndex + 1}${totalPairs > 1 ? ` / ${totalPairs}` : ''}</strong><span>基准 Persona ↔ 对比 Persona</span></div>
+                <div class="pmp14-pair-score"><b>${Math.round(score * 100)}%</b><span>描述相似度</span></div>
+                <div class="pmp14-pair-metrics"><span>共同 ${commonPct}%</span><span>修改 ${counts.changed}</span><span>A 独有 ${counts.onlyA}</span><span>B 独有 ${counts.onlyB}</span></div>
+            </div>
+            <div class="pmp14-compare-panels">
+                <section class="pmp14-side-panel" data-scroll="compare" data-scroll-group="${pairIndex}">
+                    <header>${renderAvatar(a, true)}<div><strong>${escapeHtml(a.name)}</strong><span>ID：${escapeHtml(a.id)}</span></div><em>A 基准</em></header>
+                    <div class="pmp14-diff-body">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.a || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
+                </section>
+                <div class="pmp14-diff-rail">${rows.map((row, i) => `<button class="${row.type}" data-action="jump-row" data-row="${i}" data-group="${pairIndex}" title="${row.type}">${row.type === 'same' ? '=' : row.type === 'replace' ? '≠' : row.type === 'remove' ? '−' : '+'}</button>`).join('')}</div>
+                <section class="pmp14-side-panel" data-scroll="compare" data-scroll-group="${pairIndex}">
+                    <header>${renderAvatar(b, true)}<div><strong>${escapeHtml(b.name)}</strong><span>ID：${escapeHtml(b.id)}</span></div><em>B 对比</em></header>
+                    <div class="pmp14-diff-body">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.b || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
+                </section>
+            </div>
+        </section>`;
+}
+
+function renderCompareWorkspace(personas) {
+    const chosen = state.compareIds.map(id => personas.find(p => p.id === id)).filter(Boolean);
+    if (chosen.length < 2) return renderManagerContent(personas);
+
+    const [baseline, ...targets] = chosen;
+    const pairs = targets.map((target, index) => renderComparePair(baseline, target, index, targets.length)).join('');
+
+    return `
+        <div class="pmp14-compare-workspace pmp14-multi-workspace">
             <div class="pmp14-compare-topbar">
                 <button class="pmp14-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回列表</button>
-                <div class="pmp14-compare-title"><strong>Persona 对比</strong><span>${escapeHtml(mode.title)}</span></div>
-                <button class="pmp14-small-btn" data-action="swap-compare"><i class="fa-solid fa-right-left"></i> 交换</button>
+                <div class="pmp14-compare-title"><strong>Persona 多重对比</strong><span>已选择 ${chosen.length} 个 Persona：第 1 个作为基准，其余全部参与比较；文本匹配不依赖原始顺序。</span></div>
+                <button class="pmp14-small-btn" data-action="swap-compare"><i class="fa-solid fa-right-left"></i> 交换前两个</button>
             </div>
-            <div class="pmp14-compare-summary">
-                <div class="pmp14-score-block"><div class="pmp14-big-score">${Math.round(score * 100)}<small>%</small></div><div><strong>描述相似度</strong><span>${escapeHtml(mode.desc)}</span></div></div>
-                <div class="pmp14-metrics">
-                    <div><b>${commonPct}%</b><span>共同行</span></div>
-                    <div><b>${counts.changed}</b><span>修改</span></div>
-                    <div><b>${counts.onlyA}</b><span>A 独有</span></div>
-                    <div><b>${counts.onlyB}</b><span>B 独有</span></div>
-                </div>
+            <div class="pmp14-multi-baseline">
+                <div>${renderAvatar(baseline, true)}<div><strong>基准 Persona</strong><span>${escapeHtml(baseline.name)} · ID：${escapeHtml(baseline.id)}</span></div></div>
+                <span>共 ${chosen.length - 1} 个对比对象</span>
             </div>
-            <div class="pmp14-compare-legend"><span><i class="common"></i>共同</span><span><i class="changed"></i>修改</span><span><i class="removed"></i>A 独有</span><span><i class="added"></i>B 独有</span></div>
-            <div class="pmp14-compare-panels">
-                <section class="pmp14-side-panel" data-scroll="compare">
-                    <header>${renderAvatar(a, true)}<div><strong>${escapeHtml(a.name)}</strong><span>ID：${escapeHtml(a.id)}</span></div><em>A</em></header>
-                    <div class="pmp14-diff-body" id="pmp14-left-diff">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.a || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
-                </section>
-                <div class="pmp14-diff-rail">${rows.map((row, i) => `<button class="${row.type}" data-action="jump-row" data-row="${i}" title="${row.type}">${row.type === 'same' ? '=' : row.type === 'replace' ? '≠' : row.type === 'remove' ? '−' : '+'}</button>`).join('')}</div>
-                <section class="pmp14-side-panel" data-scroll="compare">
-                    <header>${renderAvatar(b, true)}<div><strong>${escapeHtml(b.name)}</strong><span>ID：${escapeHtml(b.id)}</span></div><em>B</em></header>
-                    <div class="pmp14-diff-body" id="pmp14-right-diff">${rows.map((row, i) => `<div class="pmp14-diff-row ${row.type}" data-row="${i}"><span class="pmp14-line-no">${i + 1}</span><code>${row.b || '<span class="pmp14-placeholder">—</span>'}</code></div>`).join('')}</div>
-                </section>
-            </div>
+            <div class="pmp14-compare-legend"><span><i class="common"></i>共同</span><span><i class="changed"></i>修改（颜色直接落在文字）</span><span><i class="removed"></i>A 独有</span><span><i class="added"></i>B 独有</span></div>
+            <div class="pmp14-multi-pairs">${pairs}</div>
         </div>`;
 }
 
@@ -376,7 +468,7 @@ function renderManager() {
             </div>
             <nav class="pmp14-tabs">${tabButton('all', '全部 Persona', 'fa-layer-group')}${tabButton('same-name', '同名 Persona', 'fa-people-group', sameNameGroups.length)}${tabButton('duplicates', '完全重复', 'fa-copy', duplicateGroups.length)}${tabButton('similar', '高度相似', 'fa-clone', similarPairs.length)}</nav>
             <main class="pmp14-content">${renderManagerContent(personas)}</main>
-            ${state.selected.size >= 2 ? `<div class="pmp14-selection-bar"><div><strong>已选择 ${state.selected.size} 个 Persona</strong><span>对比时会自动取前两个，建议选择 2 个</span></div><button class="pmp14-primary-btn" data-action="compare-selected"><i class="fa-solid fa-code-compare"></i> 开始对比</button><button class="pmp14-small-btn" data-action="clear-selection">清除选择</button></div>` : ''}`}
+            ${state.selected.size >= 2 ? `<div class="pmp14-selection-bar"><div><strong>已选择 ${state.selected.size} 个 Persona</strong><span>第 1 个作为基准，其余全部参与比较</span></div><button class="pmp14-primary-btn" data-action="compare-selected"><i class="fa-solid fa-code-compare"></i> 开始对比</button><button class="pmp14-small-btn" data-action="clear-selection">清除选择</button></div>` : ''}`}
         </section>`;
 
     const input = document.getElementById('pmp14-search');
@@ -411,12 +503,12 @@ function ensureRoot() {
         if (action === 'clear-selection') { state.selected.clear(); renderManager(); return; }
         if (action === 'select-group') { for (const id of (target.dataset.ids || '').split('|').filter(Boolean)) state.selected.add(id); renderManager(); return; }
         if (action === 'compare-pair') { state.compareIds = [target.dataset.a, target.dataset.b]; state.selected.clear(); renderManager(); return; }
-        if (action === 'compare-selected') { state.compareIds = [...state.selected].slice(0, 2); state.selected.clear(); renderManager(); return; }
+        if (action === 'compare-selected') { state.compareIds = [...state.selected]; state.selected.clear(); renderManager(); return; }
         if (action === 'exit-compare') { state.compareIds = []; renderManager(); return; }
         if (action === 'swap-compare') { state.compareIds.reverse(); renderManager(); return; }
         if (action === 'jump-row') {
             const row = target.dataset.row;
-            document.querySelectorAll(`#pmp14-left-diff [data-row="${row}"], #pmp14-right-diff [data-row="${row}"]`).forEach(el => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+            const group = target.dataset.group; document.querySelectorAll(`#pmp14-root [data-scroll-group="${group}"] [data-row="${row}"]`).forEach(el => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
         }
     });
 
@@ -440,16 +532,24 @@ function ensureRoot() {
 }
 
 function bindCompareScroll() {
-    const panels = [...document.querySelectorAll('#pmp14-root [data-scroll="compare"] .pmp14-diff-body')];
-    if (panels.length !== 2) return;
-    let syncing = false;
-    panels.forEach(panel => panel.addEventListener('scroll', () => {
-        if (syncing) return;
-        syncing = true;
-        const other = panels.find(p => p !== panel);
-        if (other) other.scrollTop = panel.scrollTop;
-        requestAnimationFrame(() => { syncing = false; });
-    }));
+    const groups = new Map();
+    document.querySelectorAll('#pmp14-root [data-scroll="compare"][data-scroll-group]').forEach(panel => {
+        const group = panel.dataset.scrollGroup;
+        const body = panel.querySelector('.pmp14-diff-body');
+        if (!body) return;
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group).push(body);
+    });
+    for (const panels of groups.values()) {
+        if (panels.length < 2) continue;
+        let syncing = false;
+        panels.forEach(panel => panel.addEventListener('scroll', () => {
+            if (syncing) return;
+            syncing = true;
+            panels.forEach(other => { if (other !== panel) other.scrollTop = panel.scrollTop; });
+            requestAnimationFrame(() => { syncing = false; });
+        }));
+    }
 }
 
 function openManager(tab = 'all') {

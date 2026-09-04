@@ -1,4 +1,4 @@
-/* Persona Manager v1.6.0 */
+/* Persona Manager v1.4.0 */
 
 .pmp14-entry {
     display: flex !important;
@@ -164,4 +164,52 @@ body.pmp14-open { overflow: hidden !important; }
     .pmp14-side-panel:first-child { border-radius:10px 0 0 10px; }
     .pmp14-side-panel:last-child { border-radius:0 10px 10px 0; }
     .pmp14-selection-bar > div span { display:none; }
+}
+
+/* v1.6.1 multi-Persona comparison */
+.pmp14-multi-workspace { min-height:0; }
+.pmp14-multi-baseline {
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    padding:10px 20px; border-bottom:1px solid rgba(0,0,0,.07);
+    background:rgba(255,138,98,.055);
+}
+.pmp14-multi-baseline > div { display:flex; align-items:center; gap:10px; min-width:0; }
+.pmp14-multi-baseline strong,.pmp14-multi-baseline span { display:block; }
+.pmp14-multi-baseline > div span { margin-top:2px; font-size:10px; opacity:.52; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pmp14-multi-baseline > span { font-size:11px; opacity:.52; white-space:nowrap; }
+.pmp14-multi-pairs { flex:1; min-height:0; overflow:auto; padding:12px 14px 18px; }
+.pmp14-multi-pair { margin-bottom:14px; border:1px solid rgba(127,127,127,.16); border-radius:13px; overflow:hidden; }
+.pmp14-multi-pair:last-child { margin-bottom:0; }
+.pmp14-multi-pair-head { display:flex; align-items:center; gap:16px; padding:9px 13px; border-bottom:1px solid rgba(127,127,127,.12); background:rgba(127,127,127,.035); }
+.pmp14-pair-label { min-width:150px; }
+.pmp14-pair-label strong,.pmp14-pair-label span { display:block; }
+.pmp14-pair-label span { margin-top:2px; font-size:10px; opacity:.48; }
+.pmp14-pair-score { display:flex; align-items:baseline; gap:5px; }
+.pmp14-pair-score b { font-size:18px; }
+.pmp14-pair-score span { font-size:10px; opacity:.5; }
+.pmp14-pair-metrics { margin-left:auto; display:flex; gap:12px; font-size:10px; opacity:.58; flex-wrap:wrap; justify-content:flex-end; }
+.pmp14-multi-pair .pmp14-compare-panels { min-height:280px; max-height:48vh; padding:0; }
+.pmp14-multi-pair .pmp14-diff-row.same { background:transparent; }
+.pmp14-multi-pair .pmp14-diff-row.replace,
+.pmp14-multi-pair .pmp14-diff-row.remove,
+.pmp14-multi-pair .pmp14-diff-row.add { background:transparent; }
+.pmp14-multi-pair .pmp14-diff-remove,
+.pmp14-multi-pair .pmp14-diff-add {
+    display:inline; padding:1px 3px; border-radius:4px;
+    text-decoration:none; box-decoration-break:clone; -webkit-box-decoration-break:clone;
+}
+.pmp14-multi-pair .pmp14-diff-remove { background:rgba(235,105,105,.30); }
+.pmp14-multi-pair .pmp14-diff-add { background:rgba(88,178,126,.30); }
+.pmp14-multi-pair .pmp14-diff-row.replace code,
+.pmp14-multi-pair .pmp14-diff-row.remove code,
+.pmp14-multi-pair .pmp14-diff-row.add code { background:transparent; }
+
+@media (max-width: 900px) {
+    .pmp14-pair-metrics { display:none; }
+    .pmp14-pair-label { min-width:0; flex:1; }
+}
+@media (max-width: 650px) {
+    .pmp14-multi-baseline { padding:9px 12px; }
+    .pmp14-multi-pairs { padding:8px; }
+    .pmp14-multi-pair .pmp14-compare-panels { max-height:55vh; }
 }
