@@ -10,7 +10,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.6.1';
+const VERSION = '1.7.0';
 const ROOT_ID = 'pmp14-root';
 const BUTTON_ID = 'pmp14-entry';
 const ENTRY_MARK = 'pmp14-entry-installed';
@@ -412,233 +412,108 @@ function renderComparePair(a, b, pairIndex, totalPairs) {
         </section>`;
 }
 
+
+function normalizeText(text) {
+    return String(text || '').replace(/\r\n/g, '\n').trim();
+}
+function getPersonaDescription(id) {
+    const d = (power_user.persona_descriptions || {})[id];
+    return typeof d === 'string' ? d : (d?.description || '');
+}
+function personaById(id) {
+    return getAllPersonas().find(p => p.avatarId === id);
+}
+function splitUnits(text) {
+    return normalizeText(text).split(/\n+|(?<=[。！？.!?；;])/).map(s => s.trim()).filter(Boolean);
+}
+function unitSimilarity(a,b) {
+    a=normalizeText(a); b=normalizeText(b);
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const A=new Set(a.split(/\s+/)), B=new Set(b.split(/\s+/));
+    const inter=[...A].filter(x=>B.has(x)).length;
+    return inter/Math.max(1,new Set([...A,...B]).size);
+}
+function unorderedDiff(a,b) {
+    const A=splitUnits(a), B=splitUnits(b), used=new Set(), rows=[];
+    for (const x of A) {
+        let bi=-1, bs=0;
+        B.forEach((y,i)=>{ if(!used.has(i)){const s=unitSimilarity(x,y);if(s>bs){bs=s;bi=i;}}});
+        if (bi>=0 && bs>=0.72) {
+            used.add(bi);
+            rows.push({type:x===B[bi]?'same':'modified',a:x,b:B[bi]});
+        } else rows.push({type:'a-only',a:x,b:''});
+    }
+    B.forEach((x,i)=>{if(!used.has(i)) rows.push({type:'b-only',a:'',b:x});});
+    return rows;
+}
+function renderDiffRow(r) {
+    if(r.type==='same') return `<div class="pmp17-row same">${escapeHtml(r.a)}</div>`;
+    if(r.type==='modified') return `<div class="pmp17-row modified"><span class="pmp17-old">${escapeHtml(r.a)}</span><span class="pmp17-arrow"> → </span><span class="pmp17-new">${escapeHtml(r.b)}</span></div>`;
+    if(r.type==='a-only') return `<div class="pmp17-row a-only"><span class="pmp17-old">${escapeHtml(r.a)}</span></div>`;
+    return `<div class="pmp17-row b-only"><span class="pmp17-new">${escapeHtml(r.b)}</span></div>`;
+}
+function savePersonaDescription(id, description) {
+    const all = power_user.persona_descriptions || (power_user.persona_descriptions = {});
+    const old = all[id];
+    all[id] = (old && typeof old === 'object') ? {...old, description} : {description};
+    try {
+        const ctx = typeof getContext === 'function' ? getContext() : null;
+        const fn = ctx?.saveSettingsDebounced || window.saveSettingsDebounced;
+        if (typeof fn === 'function') fn();
+    } catch {}
+    try {
+        if (typeof eventSource?.emit === 'function' && event_types?.PERSONA_CHANGED) eventSource.emit(event_types.PERSONA_CHANGED);
+    } catch {}
+}
+function openPersonaEditor17(id, refresh) {
+    const p=personaById(id); if(!p) return;
+    document.querySelector('.pmp17-editor')?.remove();
+    const el=document.createElement('div');
+    el.className='pmp17-editor';
+    el.innerHTML=`<div class="pmp17-editor-box">
+      <div class="pmp17-editor-head"><b>编辑 Persona：${escapeHtml(p.displayName)}</b><button class="menu_button pmp17-close">×</button></div>
+      <div class="pmp17-editor-id">${escapeHtml(p.avatarId)}</div>
+      <textarea class="text_pole pmp17-text"></textarea>
+      <div class="pmp17-actions"><button class="menu_button pmp17-cancel">取消</button><button class="menu_button pmp17-save">保存并重新比较</button></div>
+    </div>`;
+    document.body.appendChild(el);
+    el.querySelector('textarea').value=getPersonaDescription(id);
+    const close=()=>el.remove();
+    el.querySelector('.pmp17-close').onclick=close;
+    el.querySelector('.pmp17-cancel').onclick=close;
+    el.querySelector('.pmp17-save').onclick=()=>{savePersonaDescription(id,el.querySelector('textarea').value);close();refresh?.();};
+}
 function renderCompareWorkspace(personas) {
-    const chosen = state.compareIds.map(id => personas.find(p => p.id === id)).filter(Boolean);
-    if (chosen.length < 2) return renderManagerContent(personas);
-
-    const [baseline, ...targets] = chosen;
-    const pairs = targets.map((target, index) => renderComparePair(baseline, target, index, targets.length)).join('');
-
-    return `
-        <div class="pmp14-compare-workspace pmp14-multi-workspace">
-            <div class="pmp14-compare-topbar">
-                <button class="pmp14-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回列表</button>
-                <div class="pmp14-compare-title"><strong>Persona 多重对比</strong><span>已选择 ${chosen.length} 个 Persona：第 1 个作为基准，其余全部参与比较；文本匹配不依赖原始顺序。</span></div>
-                <button class="pmp14-small-btn" data-action="swap-compare"><i class="fa-solid fa-right-left"></i> 交换前两个</button>
-            </div>
-            <div class="pmp14-multi-baseline">
-                <div>${renderAvatar(baseline, true)}<div><strong>基准 Persona</strong><span>${escapeHtml(baseline.name)} · ID：${escapeHtml(baseline.id)}</span></div></div>
-                <span>共 ${chosen.length - 1} 个对比对象</span>
-            </div>
-            <div class="pmp14-compare-legend"><span><i class="common"></i>共同</span><span><i class="changed"></i>修改（颜色直接落在文字）</span><span><i class="removed"></i>A 独有</span><span><i class="added"></i>B 独有</span></div>
-            <div class="pmp14-multi-pairs">${pairs}</div>
-        </div>`;
+    const ids=state.compareIds?.length ? state.compareIds : personas.map(p=>p.avatarId);
+    const baseId=state.baselineId && ids.includes(state.baselineId) ? state.baselineId : ids[0];
+    state.baselineId=baseId;
+    const ps=ids.map(personaById).filter(Boolean), base=personaById(baseId);
+    if(!base || ps.length<2) return '<div class="pmp-empty">至少选择 2 个 Persona。</div>';
+    const others=ps.filter(p=>p.avatarId!==baseId);
+    return `<div class="pmp17-compare">
+      <div class="pmp17-toolbar"><b>当前基准：</b>${ps.map(p=>`<button class="menu_button pmp17-base ${p.avatarId===baseId?'active':''}" data-pmp17-base="${escapeHtml(p.avatarId)}">${escapeHtml(p.displayName)}</button>`).join('')}</div>
+      <div class="pmp17-originals">
+        <div><h4>${escapeHtml(base.displayName)} · 完整描述</h4><pre>${escapeHtml(getPersonaDescription(base.avatarId))||'（无描述）'}</pre></div>
+        ${others.map(p=>`<div><h4>${escapeHtml(p.displayName)} · 完整描述 <button class="menu_button pmp17-edit" data-pmp17-edit="${escapeHtml(p.avatarId)}">编辑</button></h4><pre>${escapeHtml(getPersonaDescription(p.avatarId))||'（无描述）'}</pre></div>`).join('')}
+      </div>
+      ${others.map(p=>`<section class="pmp17-pair"><div class="pmp17-pair-title">${escapeHtml(base.displayName)} ↔ ${escapeHtml(p.displayName)}</div><div class="pmp17-diff">${unorderedDiff(getPersonaDescription(base.avatarId),getPersonaDescription(p.avatarId)).map(renderDiffRow).join('')}</div></section>`).join('')}
+    </div>`;
 }
-
-function tabButton(key, label, icon, count) {
-    return `<button class="pmp14-tab ${state.tab === key ? 'is-active' : ''}" type="button" data-action="tab" data-tab="${key}"><i class="fa-solid ${icon}"></i><span>${label}</span>${typeof count === 'number' ? `<em>${count}</em>` : ''}</button>`;
-}
-
-function renderManagerContent(personas) {
-    return state.tab === 'all' ? renderAllView(personas)
-        : state.tab === 'same-name' ? renderSameNameView(personas)
-        : state.tab === 'duplicates' ? renderDuplicateView(personas)
-        : renderSimilarView(personas);
-}
-
-function renderManager() {
-    const root = document.getElementById(ROOT_ID);
-    if (!root) return;
-    const personas = getPersonaData();
-    const sameNameGroups = getSameNameGroups(personas);
-    const duplicateGroups = getExactDuplicateGroups(personas);
-    const similarPairs = getSimilarPairs(personas);
-
-    root.innerHTML = `
-        <div class="pmp14-backdrop" data-action="close"></div>
-        <section class="pmp14-window" role="dialog" aria-modal="true" aria-label="Persona Manager">
-            <header class="pmp14-header">
-                <div class="pmp14-brand"><div class="pmp14-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div><div><h1>Persona Manager</h1><span>整理、识别与对比你的 Persona</span></div></div>
-                <button class="pmp14-close" type="button" data-action="close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
-            </header>
-            ${state.compareIds.length >= 2 ? renderCompareWorkspace(personas) : `
-            <div class="pmp14-toolbar">
-                <div class="pmp14-search"><i class="fa-solid fa-magnifying-glass"></i><input id="pmp14-search" type="search" value="${escapeHtml(state.query)}" placeholder="搜索 Persona 名称或描述…" autocomplete="off">${state.query ? '<button data-action="clear-search"><i class="fa-solid fa-xmark"></i></button>' : ''}</div>
-                <div class="pmp14-stats"><span><b>${personas.length}</b> 全部</span><span><b>${sameNameGroups.length}</b> 同名组</span><span><b>${duplicateGroups.length}</b> 重复组</span><span><b>${similarPairs.length}</b> 相似对</span></div>
-            </div>
-            <nav class="pmp14-tabs">${tabButton('all', '全部 Persona', 'fa-layer-group')}${tabButton('same-name', '同名 Persona', 'fa-people-group', sameNameGroups.length)}${tabButton('duplicates', '完全重复', 'fa-copy', duplicateGroups.length)}${tabButton('similar', '高度相似', 'fa-clone', similarPairs.length)}</nav>
-            <main class="pmp14-content">${renderManagerContent(personas)}</main>
-            ${state.selected.size >= 2 ? `<div class="pmp14-selection-bar"><div><strong>已选择 ${state.selected.size} 个 Persona</strong><span>第 1 个作为基准，其余全部参与比较</span></div><button class="pmp14-primary-btn" data-action="compare-selected"><i class="fa-solid fa-code-compare"></i> 开始对比</button><button class="pmp14-small-btn" data-action="clear-selection">清除选择</button></div>` : ''}`}
-        </section>`;
-
-    const input = document.getElementById('pmp14-search');
-    if (input && document.activeElement !== input) {
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-    }
-    bindCompareScroll();
-}
-
-function ensureRoot() {
-    let root = document.getElementById(ROOT_ID);
-    if (!root) {
-        root = document.createElement('div');
-        root.id = ROOT_ID;
-        root.hidden = true;
-        document.body.appendChild(root);
-    }
-    if (root.dataset.bound === '1') return;
-    root.dataset.bound = '1';
-
-    root.addEventListener('click', event => {
-        const target = event.target.closest('[data-action]');
-        if (!target) return;
-        const action = target.dataset.action;
-        if (action === 'close') {
-            if (target.classList.contains('pmp14-backdrop') || target.classList.contains('pmp14-close')) closeManager();
-            return;
-        }
-        if (action === 'tab') { state.tab = target.dataset.tab || 'all'; state.selected.clear(); state.compareIds = []; renderManager(); return; }
-        if (action === 'clear-search') { state.query = ''; renderManager(); return; }
-        if (action === 'clear-selection') { state.selected.clear(); renderManager(); return; }
-        if (action === 'select-group') { for (const id of (target.dataset.ids || '').split('|').filter(Boolean)) state.selected.add(id); renderManager(); return; }
-        if (action === 'compare-pair') { state.compareIds = [target.dataset.a, target.dataset.b]; state.selected.clear(); renderManager(); return; }
-        if (action === 'compare-selected') { state.compareIds = [...state.selected]; state.selected.clear(); renderManager(); return; }
-        if (action === 'exit-compare') { state.compareIds = []; renderManager(); return; }
-        if (action === 'swap-compare') { state.compareIds.reverse(); renderManager(); return; }
-        if (action === 'jump-row') {
-            const row = target.dataset.row;
-            const group = target.dataset.group; document.querySelectorAll(`#pmp14-root [data-scroll-group="${group}"] [data-row="${row}"]`).forEach(el => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
-        }
-    });
-
-    root.addEventListener('change', event => {
-        const input = event.target.closest('input[data-action="select"]');
-        if (!input) return;
-        const card = input.closest('[data-persona-id]');
-        if (!card) return;
-        if (input.checked) state.selected.add(card.dataset.personaId); else state.selected.delete(card.dataset.personaId);
-        renderManager();
-    });
-
-    root.addEventListener('input', event => {
-        if (event.target.id !== 'pmp14-search') return;
-        state.query = event.target.value;
-        const caret = event.target.selectionStart;
-        renderManager();
-        const next = document.getElementById('pmp14-search');
-        if (next) next.setSelectionRange(caret, caret);
+function installCompareHandlers17() {
+    if(window.__pmp17Handlers)return;
+    window.__pmp17Handlers=true;
+    document.addEventListener('click',e=>{
+        const b=e.target.closest?.('[data-pmp17-base]');
+        if(b){state.baselineId=b.dataset.pmp17Base;renderManager();return;}
+        const ed=e.target.closest?.('[data-pmp17-edit]');
+        if(ed) openPersonaEditor17(ed.dataset.pmp17Edit,()=>renderManager());
     });
 }
-
-function bindCompareScroll() {
-    const groups = new Map();
-    document.querySelectorAll('#pmp14-root [data-scroll="compare"][data-scroll-group]').forEach(panel => {
-        const group = panel.dataset.scrollGroup;
-        const body = panel.querySelector('.pmp14-diff-body');
-        if (!body) return;
-        if (!groups.has(group)) groups.set(group, []);
-        groups.get(group).push(body);
-    });
-    for (const panels of groups.values()) {
-        if (panels.length < 2) continue;
-        let syncing = false;
-        panels.forEach(panel => panel.addEventListener('scroll', () => {
-            if (syncing) return;
-            syncing = true;
-            panels.forEach(other => { if (other !== panel) other.scrollTop = panel.scrollTop; });
-            requestAnimationFrame(() => { syncing = false; });
-        }));
-    }
-}
-
-function openManager(tab = 'all') {
-    ensureRoot();
-    state.active = true;
-    state.tab = tab;
-    state.selected.clear();
-    state.compareIds = [];
-    const root = document.getElementById(ROOT_ID);
-    root.hidden = false;
-    document.body.classList.add('pmp14-open');
-    renderManager();
-}
-
-function closeManager() {
-    state.active = false;
-    state.selected.clear();
-    state.compareIds = [];
-    const root = document.getElementById(ROOT_ID);
-    if (root) root.hidden = true;
-    document.body.classList.remove('pmp14-open');
-}
-
-function findGlobalSettingsHeading() {
-    const elements = document.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span');
-    for (const element of elements) {
-        if (element.dataset.pmp14 === ENTRY_MARK) continue;
-        if (element.children.length > 3) continue;
-        const text = element.textContent?.trim();
-        if (text !== '全局设置') continue;
-        const rect = element.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        return element;
-    }
-    return null;
-}
-
-function makeEntry() {
-    const entry = document.createElement('button');
-    entry.id = BUTTON_ID;
-    entry.type = 'button';
-    entry.className = 'menu_button pmp14-entry';
-    entry.dataset.pmp14 = ENTRY_MARK;
-    entry.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
-    entry.addEventListener('click', () => openManager('all'));
-    return entry;
-}
-
-function injectEntry() {
-    if (document.getElementById(BUTTON_ID)) return true;
-    const heading = findGlobalSettingsHeading();
-    if (!heading?.parentNode) return false;
-    heading.parentNode.insertBefore(makeEntry(), heading);
-    return true;
-}
-
-function installEntryObserver() {
-    if (window.__pmp14Observer) return;
-    const observer = new MutationObserver(() => {
-        if (injectEntry()) {
-            observer.disconnect();
-            window.__pmp14Observer = null;
-        }
-    });
-    window.__pmp14Observer = observer;
-    observer.observe(document.body, { childList: true, subtree: true });
-    if (injectEntry()) {
-        observer.disconnect();
-        window.__pmp14Observer = null;
-    }
-}
-
-function installKeyboardHandler() {
-    if (window.__pmp14Keyboard) return;
-    const handler = event => {
-        if (!state.active) return;
-        if (event.key === 'Escape') { closeManager(); return; }
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
-            const input = document.getElementById('pmp14-search');
-            if (input && !state.compareIds.length) { event.preventDefault(); input.focus(); }
-        }
-    };
-    window.__pmp14Keyboard = handler;
-    document.addEventListener('keydown', handler);
-}
-
 async function init() {
     ensureRoot();
     installKeyboardHandler();
+    installCompareHandlers17();
     installEntryObserver();
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
