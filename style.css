@@ -225,3 +225,11 @@ body.pmp14-open { overflow: hidden !important; }
 .pmp17-editor{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px}
 .pmp17-editor-box{width:min(1000px,96vw);max-height:92vh;background:var(--SmartThemeBodyColor);padding:16px;border-radius:12px;display:flex;flex-direction:column;gap:10px}
 .pmp17-editor-head{display:flex;justify-content:space-between;align-items:center}.pmp17-editor-id{opacity:.65}.pmp17-text{min-height:55vh;resize:vertical}.pmp17-actions{display:flex;justify-content:flex-end;gap:8px}
+
+/* v1.7.1 update panel */
+.pmp17-entry{display:flex!important;align-items:center;gap:8px;width:100%;box-sizing:border-box}
+.pmp17-entry small{margin-left:auto;opacity:.65}
+#pmp17-update-box{display:flex;align-items:center;gap:10px;margin:10px 0;padding:9px 12px;border:1px solid var(--SmartThemeBorderColor);border-radius:8px}
+#pmp17-update-box .pmp17-update-text{flex:1;line-height:1.35}
+#pmp17-update-box.available{border-width:1px}
+#pmp17-update-box.error{opacity:.85}

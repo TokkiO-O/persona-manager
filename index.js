@@ -10,7 +10,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const ROOT_ID = 'pmp14-root';
 const BUTTON_ID = 'pmp14-entry';
 const ENTRY_MARK = 'pmp14-entry-installed';
@@ -510,10 +510,147 @@ function installCompareHandlers17() {
         if(ed) openPersonaEditor17(ed.dataset.pmp17Edit,()=>renderManager());
     });
 }
+
+function findGlobalSettingsHeading17() {
+    const elements = document.querySelectorAll('h1,h2,h3,h4,h5,h6,legend,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span');
+    for (const el of elements) {
+        if (el.dataset?.pmp171 === 'entry') continue;
+        if (el.children.length > 3) continue;
+        const text = el.textContent?.trim();
+        if (text !== '全局设置') continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        return el;
+    }
+    return null;
+}
+function makeEntry17() {
+    const b = document.createElement('button');
+    b.id = 'persona-manager-entry';
+    b.type = 'button';
+    b.className = 'menu_button pmp17-entry';
+    b.dataset.pmp171 = 'entry';
+    b.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
+    b.addEventListener('click', () => openManager('all'));
+    return b;
+}
+function injectEntry17() {
+    if (document.getElementById('persona-manager-entry')) return true;
+    const heading = findGlobalSettingsHeading17();
+    if (!heading?.parentNode) return false;
+    heading.parentNode.insertBefore(makeEntry17(), heading);
+    return true;
+}
+function installEntryObserver17() {
+    if (window.__pmp171EntryObserver) return;
+    const observer = new MutationObserver(() => {
+        if (injectEntry17()) {
+            observer.disconnect();
+            window.__pmp171EntryObserver = null;
+        }
+    });
+    window.__pmp171EntryObserver = observer;
+    observer.observe(document.body, { childList: true, subtree: true });
+    if (injectEntry17()) {
+        observer.disconnect();
+        window.__pmp171EntryObserver = null;
+    }
+}
+
+async function checkForUpdate17() {
+    const box = document.querySelector('#pmp17-update-box');
+    if (!box) return;
+    box.classList.remove('available','error');
+    box.querySelector('.pmp17-update-text').textContent = '正在检查新版本…';
+    try {
+        const r = await fetch('https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json', {cache:'no-store'});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const remote = await r.json();
+        const rv = String(remote.version || '');
+        if (rv && rv !== VERSION) {
+            box.classList.add('available');
+            box.dataset.remoteVersion = rv;
+            box.querySelector('.pmp17-update-text').innerHTML =
+                `<b>发现新版本 ${escapeHtml(rv)}</b><br><span>${escapeHtml(remote.description || 'Persona Manager 更新')}</span>`;
+            const btn = box.querySelector('.pmp17-update-action');
+            btn.textContent = '更新';
+            btn.disabled = false;
+        } else {
+            box.querySelector('.pmp17-update-text').textContent = `已是最新版本（${VERSION}）`;
+            box.querySelector('.pmp17-update-action').textContent = '检查更新';
+        }
+    } catch (e) {
+        box.classList.add('error');
+        box.querySelector('.pmp17-update-text').textContent = '暂时无法检查更新，请确认网络连接。';
+        box.querySelector('.pmp17-update-action').textContent = '重试';
+    }
+}
+function installUpdateUI17() {
+    if (document.querySelector('#pmp17-update-box')) return;
+    const root = document.querySelector('#persona-manager-root, .pmp-manager-root, #persona-manager-modal');
+    if (!root) return;
+    const box = document.createElement('div');
+    box.id = 'pmp17-update-box';
+    box.innerHTML = `<div class="pmp17-update-text">检查 Persona Manager 更新…</div>
+        <button type="button" class="menu_button pmp17-update-action">检查更新</button>`;
+    root.prepend(box);
+    box.querySelector('button').addEventListener('click', async () => {
+        const rv = box.dataset.remoteVersion;
+        if (!rv || rv === VERSION) return checkForUpdate17();
+        // Let the extension manager perform the actual installation. We do not
+        // alter other extensions or rewrite its DOM.
+        if (typeof window.updateExtension === 'function') {
+            box.querySelector('button').disabled = true;
+            box.querySelector('.pmp17-update-text').textContent = `正在更新到 ${rv}…`;
+            try {
+                await window.updateExtension('persona-manager');
+                setTimeout(() => location.reload(), 1200);
+            } catch (e) {
+                box.querySelector('button').disabled = false;
+                box.querySelector('.pmp17-update-text').textContent = `更新失败：${e?.message || e}`;
+            }
+        } else {
+            box.querySelector('.pmp17-update-text').innerHTML =
+                `发现 ${escapeHtml(rv)}，请在「管理扩展」中更新。更新完成后页面会自动刷新。`;
+        }
+    });
+    checkForUpdate17();
+}
+
+
+function installUpdateUiObserver17() {
+    if (window.__pmp171UpdateObserver) return;
+    const observer = new MutationObserver(() => installUpdateUI17());
+    window.__pmp171UpdateObserver = observer;
+    observer.observe(document.body, {childList:true, subtree:true});
+    installUpdateUI17();
+}
+
+
+function startSelfVersionWatcher17() {
+    if (window.__pmp171VersionWatcher) return;
+    let last = VERSION;
+    window.__pmp171VersionWatcher = setInterval(async () => {
+        try {
+            const r = await fetch('https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json', {cache:'no-store'});
+            if (!r.ok) return;
+            const remote = await r.json();
+            const rv = String(remote.version || '');
+            if (rv && rv !== last && rv !== VERSION) {
+                clearInterval(window.__pmp171VersionWatcher);
+                location.reload();
+            }
+        } catch {}
+    }, 15000);
+}
+
 async function init() {
     ensureRoot();
     installKeyboardHandler();
     installCompareHandlers17();
+    installEntryObserver17();
+    installUpdateUiObserver17();
+    startSelfVersionWatcher17();
     installEntryObserver();
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
