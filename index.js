@@ -22,7 +22,7 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.4';
+const VERSION = '1.8.5';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -761,7 +761,7 @@ function persistPersonaDescription(id, description) {
     if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
     power_user.persona_descriptions[id] = {
             ...(power_user.persona_descriptions[id] || {}),
-            description,
+            description: String(description ?? ''),
         };
     try {
         if (typeof window.saveSettingsDebounced === 'function') {
@@ -789,7 +789,7 @@ function persistPersonaFull(id, name, description) {
     if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
     power_user.persona_descriptions[id] = {
             ...(power_user.persona_descriptions[id] || {}),
-            description,
+            description: String(description ?? ''),
         };
 
     try {
@@ -1194,7 +1194,7 @@ function ensureRoot() {
 }
 
 function openManager(tab = 'all') {
-    ensureRoot18();
+    ensureRoot();
     state.active = true;
     state.tab = tab;
     state.selected.clear();
@@ -1385,7 +1385,7 @@ function installKeyboardHandler() {
 }
 
 async function init() {
-    ensureRoot18();
+    ensureRoot();
     installKeyboardHandler();
     installEntryObserver();
     checkForUpdates().catch(() => {});
@@ -1406,13 +1406,77 @@ export function onUpdate() {
 }
 
 
-/* ==================== v1.8.4 Persona data + refresh policy ==================== */
-const PM_REFRESH = {
+/* v1.8.5 stable entry layer: kept compatible with the proven v1.6 implementation. */
+function ensureRoot() {
+    let root = document.getElementById('persona-manager-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'persona-manager-root';
+        document.body.appendChild(root);
+    }
+    return root;
+}
+
+function findGlobalSettingsHeading() {
+    const elements = document.querySelectorAll(
+        'h1,h2,h3,h4,h5,h6,legend,.inline-drawer-header,.menu_section_header,.setting-item-label,div,span'
+    );
+    for (const element of elements) {
+        if (element.dataset.pmp185 === 'entry-anchor') continue;
+        if (element.children.length > 3) continue;
+        if (element.textContent?.trim() !== '全局设置') continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        return element;
+    }
+    return null;
+}
+
+function makeEntry() {
+    const entry = document.createElement('button');
+    entry.id = 'persona-manager-entry';
+    entry.type = 'button';
+    entry.className = 'menu_button';
+    entry.dataset.pmp185 = 'entry-anchor';
+    entry.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
+    entry.addEventListener('click', () => openManager('all'));
+    return entry;
+}
+
+function injectEntry() {
+    if (document.getElementById('persona-manager-entry')) return true;
+    const heading = findGlobalSettingsHeading();
+    if (!heading?.parentNode) return false;
+    heading.parentNode.insertBefore(makeEntry(), heading);
+    return true;
+}
+
+function installEntryObserver() {
+    if (window.__pmp185Observer) return;
+    const observer = new MutationObserver(() => {
+        if (injectEntry()) {
+            observer.disconnect();
+            window.__pmp185Observer = null;
+        }
+    });
+    window.__pmp185Observer = observer;
+    observer.observe(document.body, { childList: true, subtree: true });
+    if (injectEntry()) {
+        observer.disconnect();
+        window.__pmp185Observer = null;
+    }
+}
+
+
+/* ==================== v1.8.5 low-cost Persona refresh policy ==================== */
+const PM_REFRESH = window.__personaManagerRefresh185 || {
     managerOpen: false,
     dirty: false,
-    lastSignature: '',
     scheduled: false,
+    lastSignature: '',
+    bound: false,
 };
+window.__personaManagerRefresh185 = PM_REFRESH;
 
 function pmGetPersonaDescriptor(id) {
     return power_user?.persona_descriptions?.[id] || {};
@@ -1428,49 +1492,42 @@ function pmWritePersonaDescription(id, description) {
         ...current,
         description: String(description ?? ''),
     };
-
-    // Keep the currently active Persona's legacy/current field in sync when applicable.
-    if (power_user.current_persona === id || power_user.persona === id || power_user.persona_name === id) {
-        power_user.persona_description = String(description ?? '');
-    }
 }
 
 function pmPersonaSignature() {
-    const personas = power_user?.personas || {};
-    const descriptions = power_user?.persona_descriptions || {};
-    return JSON.stringify({ personas, descriptions });
-}
-
-function pmMarkPersonaDataDirty() {
-    PM_REFRESH.dirty = true;
-    if (PM_REFRESH.managerOpen) pmScheduleManagerRefresh();
+    return JSON.stringify({
+        personas: power_user?.personas || {},
+        descriptions: power_user?.persona_descriptions || {},
+    });
 }
 
 function pmScheduleManagerRefresh() {
-    if (PM_REFRESH.scheduled || !PM_REFRESH.managerOpen) return;
+    if (!PM_REFRESH.managerOpen || PM_REFRESH.scheduled) return;
     PM_REFRESH.scheduled = true;
     requestAnimationFrame(() => {
         PM_REFRESH.scheduled = false;
         if (!PM_REFRESH.managerOpen || !PM_REFRESH.dirty) return;
         PM_REFRESH.dirty = false;
+        const signature = pmPersonaSignature();
+        if (signature === PM_REFRESH.lastSignature) return;
+        PM_REFRESH.lastSignature = signature;
         try {
-            const signature = pmPersonaSignature();
-            if (signature === PM_REFRESH.lastSignature) return;
-            PM_REFRESH.lastSignature = signature;
-            if (typeof renderManager === 'function') {
-                renderManager();
-            }
+            if (typeof renderManager === 'function') renderManager();
         } catch (error) {
             console.error('[Persona Manager] 数据刷新失败', error);
         }
     });
 }
 
+function pmMarkPersonaDataDirty() {
+    PM_REFRESH.dirty = true;
+    pmScheduleManagerRefresh();
+}
+
 function pmBindPersonaEvents() {
-    const context = window.SillyTavern?.getContext?.();
-    const events = context?.eventSource;
-    if (!events || PM_REFRESH._bound) return;
-    PM_REFRESH._bound = true;
+    if (PM_REFRESH.bound) return;
+    const events = window.SillyTavern?.getContext?.()?.eventSource;
+    if (!events?.on) return;
 
     const names = [
         'PERSONA_CHANGED',
@@ -1479,83 +1536,129 @@ function pmBindPersonaEvents() {
         'PERSONA_CREATED',
         'PERSONA_DELETED',
     ];
-
     for (const name of names) {
         const event = events[name];
         if (!event) continue;
-        try {
-            events.on(event, () => pmMarkPersonaDataDirty());
-        } catch (error) {
-            console.warn(`[Persona Manager] 无法绑定 ${name}`, error);
-        }
+        try { events.on(event, pmMarkPersonaDataDirty); } catch {}
     }
+    PM_REFRESH.bound = true;
 }
 
 function pmSetManagerOpen(open) {
     PM_REFRESH.managerOpen = Boolean(open);
     if (PM_REFRESH.managerOpen) {
         PM_REFRESH.lastSignature = pmPersonaSignature();
-        pmRefreshUpdateBadge();
+        pmBindPersonaEvents();
     }
 }
+/* ==================== end refresh policy ==================== */
 
-/* No full-document MutationObserver or polling is kept alive after startup. */
-function pmRefreshUpdateBadge() {
-    if (typeof updateManagerSettingsBadge === 'function') {
-        try { updateManagerSettingsBadge(); } catch {}
-    }
+
+/* ==================== v1.8.5 update center ==================== */
+const PM_UPDATE_EXTENSION_NAME = 'persona-manager';
+
+async function pmApiJson(url, options = {}) {
+    const response = await fetch(url, {
+        credentials: 'same-origin',
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+        },
+    });
+    const text = await response.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
+    if (!response.ok) throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
+    return data;
 }
-/* ==================== end v1.8.4 data + refresh policy ==================== */
 
-
-
-/* ==================== v1.8.4 update center ==================== */
-async function pmCheckRemoteVersion() {
+async function checkPersonaManagerUpdate() {
     try {
-        const info = await pmApiJson('/api/extensions/version', {
+        return await pmApiJson('/api/extensions/version', {
             method: 'POST',
             body: JSON.stringify({ extensionName: PM_UPDATE_EXTENSION_NAME }),
         });
-        return info;
-    } catch (error) {
+    } catch {
         return null;
     }
 }
 
-function pmShowUpdateDialog(remoteInfo) {
-    const remote = remoteInfo?.remoteVersion || remoteInfo?.version || remoteInfo?.latestVersion || '';
-    const modal = document.createElement('div');
-    modal.className = 'pmp18-update-modal';
-    modal.innerHTML = `
-      <div class="pmp18-update-backdrop"></div>
-      <div class="pmp18-update-dialog" role="dialog" aria-modal="true">
-        <div class="pmp18-update-title">📦 版本更新</div>
-        <div class="pmp18-update-version">当前版本 <b>${VERSION}</b>${remote ? `　→　最新版本 <b>${remote}</b>` : ''}</div>
-        <div class="pmp18-update-body">检测到新版本。</div>
-        <div class="pmp18-update-actions">
-          <button type="button" class="menu_button pmp18-update-cancel">稍后</button>
-          <button type="button" class="menu_button pmp18-update-confirm">立即更新</button>
+async function updatePersonaManagerNow() {
+    return pmApiJson('/api/extensions/update', {
+        method: 'POST',
+        body: JSON.stringify({
+            extensionName: PM_UPDATE_EXTENSION_NAME,
+            global: false,
+        }),
+    });
+}
+
+function pmUpdateAvailable(info) {
+    if (!info) return false;
+    if (info.isUpToDate === false) return true;
+    return false;
+}
+
+function pmCreateUpdateDialog(info) {
+    const latest = info?.latestVersion || info?.remoteVersion || '';
+    const wrap = document.createElement('div');
+    wrap.className = 'pmp185-update-modal';
+    wrap.innerHTML = `
+      <div class="pmp185-update-backdrop"></div>
+      <div class="pmp185-update-dialog" role="dialog" aria-modal="true">
+        <div class="pmp185-update-title">📦 版本更新</div>
+        <div class="pmp185-update-version">当前版本 <b>${VERSION}</b>${latest ? `　→　最新版本 <b>${latest}</b>` : ''}</div>
+        <div class="pmp185-update-body">检测到新版本。</div>
+        <div class="pmp185-update-actions">
+          <button type="button" class="menu_button pmp185-update-cancel">稍后</button>
+          <button type="button" class="menu_button pmp185-update-confirm">立即更新</button>
         </div>
       </div>`;
-    document.body.appendChild(modal);
+    document.body.appendChild(wrap);
 
-    const close = () => modal.remove();
-    modal.querySelector('.pmp18-update-backdrop').addEventListener('click', close);
-    modal.querySelector('.pmp18-update-cancel').addEventListener('click', close);
-    modal.querySelector('.pmp18-update-confirm').addEventListener('click', async () => {
-        const btn = modal.querySelector('.pmp18-update-confirm');
+    const close = () => wrap.remove();
+    wrap.querySelector('.pmp185-update-backdrop').onclick = close;
+    wrap.querySelector('.pmp185-update-cancel').onclick = close;
+    wrap.querySelector('.pmp185-update-confirm').onclick = async () => {
+        const btn = wrap.querySelector('.pmp185-update-confirm');
+        const body = wrap.querySelector('.pmp185-update-body');
         btn.disabled = true;
         btn.textContent = '更新中…';
         try {
             await updatePersonaManagerNow();
-            modal.querySelector('.pmp18-update-body').textContent = '更新完成，正在重新加载…';
+            body.textContent = '更新完成，正在重新加载…';
             setTimeout(() => location.reload(), 500);
         } catch (error) {
             btn.disabled = false;
             btn.textContent = '立即更新';
-            modal.querySelector('.pmp18-update-body').textContent = `更新失败：${error?.message || error}`;
+            body.textContent = `更新失败：${error?.message || error}`;
         }
-    });
+    };
+    return wrap;
+}
+
+async function pmCheckAndMarkUpdate(settingsContainer) {
+    const info = await checkPersonaManagerUpdate();
+    const available = pmUpdateAvailable(info);
+    if (!settingsContainer) return { info, available };
+
+    let badge = settingsContainer.querySelector('.pmp185-new-badge');
+    if (available) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'pmp185-new-badge';
+            badge.textContent = 'NEW';
+            settingsContainer.appendChild(badge);
+        }
+    } else if (badge) {
+        badge.remove();
+    }
+    return { info, available };
 }
 /* ==================== end update center ==================== */
 
+export async function onUpdate() {
+    console.log('[Persona Manager] update hook completed; reloading page');
+    setTimeout(() => location.reload(), 300);
+}

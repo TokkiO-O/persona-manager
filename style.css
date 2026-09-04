@@ -727,3 +727,31 @@ mark.pmp18-add {
     .pmp18-card-grid, .pmp18-group-grid { grid-template-columns: 1fr; }
     .pmp18-compare-tools { width: 100%; }
 }
+
+/* v1.8.5 */
+.pmp185-new-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 6px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-size: .68em;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.pmp185-update-modal { position: fixed; inset: 0; z-index: 100000; }
+.pmp185-update-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+.pmp185-update-dialog {
+    position: relative;
+    width: min(520px, calc(100vw - 32px));
+    margin: 16vh auto 0;
+    padding: 20px;
+    border-radius: 10px;
+    background: var(--SmartThemeBodyColor, #222);
+    box-shadow: 0 10px 40px rgba(0,0,0,.35);
+}
+.pmp185-update-title { font-size: 1.15em; font-weight: 700; margin-bottom: 10px; }
+.pmp185-update-version { margin-bottom: 12px; }
+.pmp185-update-body { opacity: .85; line-height: 1.6; }
+.pmp185-update-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

@@ -37,3 +37,23 @@ SillyTavern 第三方扩展：Persona 管理、同名/完全重复/高相似检�
 ## 版本
 
 v1.8.3
+
+## v1.8.5 更新
+
+### 修复
+- 修复编辑 Persona 描述后覆盖原生 `persona_descriptions` 对象、导致 SillyTavern 原 Persona 界面描述为空的问题。
+- 编辑时只更新 `description`，保留 Persona 原有的 position、depth、role、lorebook、title 等字段。
+
+### 性能优化
+- 移除 Persona Manager 常驻的全页面轮询/扫描思路。
+- Persona Manager 未打开时不进行 Persona 数据对比刷新。
+- 管理器打开后才响应 Persona 生命周期事件并合并刷新。
+- 使用 `requestAnimationFrame` 合并连续刷新，减少切换 Persona 时的卡顿。
+
+### 更新中心
+- 支持在 Persona Manager 设置区域提示新版本。
+- 有更新时显示 `NEW` 小角标。
+- 点击更新后才弹出版本更新确认窗口。
+- API 检查失败不再显示“无法获取详细日志 / 前往 Release / 前往下载”提示。
+- 更新成功后自动刷新页面。
+- 从 SillyTavern“管理扩展”更新后通过 `update` hook 自动刷新。

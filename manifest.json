@@ -5,7 +5,7 @@
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "description": "SillyTavern Persona 管理工具：Persona 管理、同名/重复/相似检测、多 Persona 对比、编辑与低开销数据刷新。",
   "hooks": {
     "update": "onUpdate"
