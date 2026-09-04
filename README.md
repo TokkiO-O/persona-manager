@@ -2,7 +2,7 @@
 
 SillyTavern 第三方扩展，用于整理、识别和对比大量 Persona（User）。
 
-**v1.3.0 是一次重新设计。**
+**v1.3.1 是一次重新设计。**
 
 这一版不再给原生 Persona 卡片增加“二次别名”，而是使用 SillyTavern 已有的 **Persona 名称 + Persona 描述/备注** 作为识别信息，并提供一个独立的 Persona Manager 管理界面。
 
@@ -75,7 +75,7 @@ Persona 描述完全一致
 
 高度相似列表也可以直接选择两个 Persona 进入对比。
 
-## v1.3.0 设计原则
+## v1.3.1 设计原则
 
 ### 不修改原生 Persona
 
@@ -91,7 +91,7 @@ Persona 描述完全一致
 
 ### 不依赖额外 Persona 数据库
 
-v1.3.0 不需要为 Persona 别名建立额外存储。
+v1.3.1 不需要为 Persona 别名建立额外存储。
 
 它直接读取 SillyTavern 当前的 Persona 数据：
 
@@ -199,7 +199,7 @@ Persona 的名称、描述和 ID 只用于当前页面的本地显示、分组�
 
 ## 版本
 
-### v1.3.0
+### v1.3.1
 
 重新设计版本：
 
