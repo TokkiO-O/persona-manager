@@ -1,42 +1,39 @@
-# Persona Manager v1.8.6
+# Persona Manager v1.8.7
 
-SillyTavern 第三方扩展：Persona 列表管理、同名/重复/相似检测、多列横滑对比、列表内编辑写回、更新检查。
+SillyTavern 第三方扩展：Persona 管理、同名/重复/相似检测、基准+单对方细比、列表编辑写回、远程 CHANGELOG 更新检查。
 
-## v1.8.6（重要修复）
+## v1.8.7
 
-- **入口**：删除 1.8.5 中重复的入口函数（曾覆盖正确挂载逻辑导致按钮消失）；优先挂到 `#persona-management-block` / 用户设定。
-- **写回**：正确处理 `persona_descriptions` 的 string / object 结构，保留 position 等字段，避免原生界面描述变空白。
-- **性能**：去掉全局 click 捕获与无限轮询；观察者挂载成功后断开，减轻换人设卡顿。
-- 列表可直接编辑**名称 + 描述**；同名可纳入高度相似（设置可关）。
-- 对比：左基准固定、右横滑；字段型描述按 key 分块 + 块内字词高亮。
+- **修复列表编辑串改其他人设**：写回只针对目标 id；不把编辑内容刷到当前激活人设（除非就是在编辑它）。
+- **对比**：默认「基准 + 当前一个对方」，顶部切换其他对方；双方都有差异底色。
+- **更新**：远程 `manifest.json` 判版本 + 远程 `CHANGELOG.md` 作日志；已是最新也有明确提示；更新成功强制刷新。
+- 去掉 index 内置大段更新日志字符串。
 
 ## 安装
 
-最终目录必须是：
+目录必须为：
 
 ```
-SillyTavern/public/scripts/extensions/third-party/persona-manager/
-  ├── index.js
-  ├── style.css
-  ├── manifest.json
-  └── README.md
+.../third-party/persona-manager/
+  index.js
+  style.css
+  manifest.json
+  README.md
 ```
 
-**不要**出现 `persona-manager/persona-manager/` 双层目录。
+不要双层文件夹。安装后 Ctrl+F5。
 
-扩展管理器安装后建议 **Ctrl+F5**。若面板无按钮，可用右下角浮动入口或控制台：
+仓库需提供：
 
-```js
-openPersonaManager()
-```
+- `https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json`
+- `https://raw.githubusercontent.com/xingx121/persona-manager/main/CHANGELOG.md`
 
 ## 使用
 
-1. 打开「用户设定 / Persona 管理」→ Persona Manager。
-2. 列表勾选 ≥2 个 → 开始对比；可切换基准、只看差异。
-3. 卡片上「编辑」可改名称与描述并写回。
-4. 设置页可调相似阈值、同名是否参与相似、检查更新。
+- 用户设定 / Persona 面板入口；或浮动按钮 / `openPersonaManager()`
+- 列表「编辑」改名称与描述
+- 多选对比后可切换当前对方
 
 ## 版本
 
-v1.8.6
+v1.8.7

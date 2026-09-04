@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.8.6",
-  "description": "Persona 管理：稳定入口、正确写回、低开销、多列对比、列表编辑、相似检测、更新检查。",
+  "version": "1.8.7",
+  "description": "Persona 管理：修复列表编辑串改、单对方细比、远程 CHANGELOG、更新反馈与强制刷新。",
   "hooks": {
     "update": "onUpdate"
   }

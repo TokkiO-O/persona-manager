@@ -1,31 +1,25 @@
 /**
- * Persona Manager v1.8.6
- * Clean rebuild: one entry path, correct persona_descriptions write-back,
- * low-overhead observers, multi-column compare, list edit, update check.
+ * Persona Manager v1.8.7
+ * - Fix list-edit writing into the wrong persona
+ * - Focus compare: baseline + one other (switchable)
+ * - Remote CHANGELOG.md for update notes
+ * - Clear update feedback + force reload
  */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.6';
+const VERSION = '1.8.7';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
 const STORAGE_KEY = 'pmp18_settings';
-
-const CHANGELOG = `## v1.8.6
-- 修复入口被重复代码覆盖导致按钮消失
-- 修复写回描述后原生界面变空白（兼容 string/object 结构）
-- 大幅降低常驻观察与轮询，减轻换人设卡顿
-- 保留多列横滑对比、列表编辑、相似阈值、更新检查
-
-## v1.8.5 / 1.8.3
-- 更新检测、同名可参与相似、列表编辑等`;
+const REMOTE_MANIFEST = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json';
+const REMOTE_CHANGELOG = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/CHANGELOG.md';
 
 const defaultSettings = {
     similarityThreshold: 0.55,
     includeSameNameInSimilar: true,
-    compareLayout: 'revision',
     showDiffOnly: false,
     softMatchThreshold: 0.35,
 };
@@ -37,6 +31,7 @@ const state = {
     selected: new Set(),
     compareIds: [],
     baselineId: null,
+    focusOtherId: null,
     settings: loadSettings(),
     updateInfo: null,
 };
@@ -57,22 +52,21 @@ function saveSettingsLocal() {
     } catch { /* ignore */ }
 }
 
-const escapeHtml = (value = '') => String(value)
+const escapeHtml = (v = '') => String(v)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
 
-const normalizeText = (value = '') => String(value)
+const normalizeText = (v = '') => String(v)
     .normalize('NFKC')
     .replace(/\s+/g, ' ')
     .trim()
     .toLocaleLowerCase();
 
-/* ---------- Persona data (ST-compatible) ---------- */
+/* ---------- Persona read / write (id-safe) ---------- */
 
-/** Read description text whether stored as string or { description } */
 function getPersonaDescription(raw) {
     if (raw == null) return '';
     if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
@@ -80,11 +74,21 @@ function getPersonaDescription(raw) {
     if (typeof raw === 'object') {
         for (const key of ['description', 'text', 'content', 'value', 'persona_description']) {
             if (raw[key] != null) {
-                const text = getPersonaDescription(raw[key]);
-                if (text) return text;
+                const t = getPersonaDescription(raw[key]);
+                if (t) return t;
             }
         }
     }
+    return '';
+}
+
+function getActiveAvatarId() {
+    try {
+        if (power_user?.user_avatar) return String(power_user.user_avatar);
+    } catch { /* ignore */ }
+    try {
+        if (window.user_avatar) return String(window.user_avatar);
+    } catch { /* ignore */ }
     return '';
 }
 
@@ -95,7 +99,7 @@ function getPersonaData() {
         const name = String(rawName ?? id);
         const description = getPersonaDescription(descriptions?.[id]);
         return {
-            id,
+            id: String(id),
             name,
             description,
             nameKey: normalizeText(name),
@@ -104,13 +108,41 @@ function getPersonaData() {
     });
 }
 
+function savePowerUserSettings() {
+    try {
+        if (typeof window.saveSettingsDebounced === 'function') {
+            window.saveSettingsDebounced();
+            return;
+        }
+    } catch { /* ignore */ }
+    try {
+        if (typeof window.saveSettings === 'function') window.saveSettings();
+    } catch { /* ignore */ }
+}
+
+function emitPersonaUpdated(id) {
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        const es = ctx?.eventSource;
+        const types = ctx?.eventTypes || ctx?.event_types;
+        if (es?.emit && types?.PERSONA_UPDATED) {
+            es.emit(types.PERSONA_UPDATED, id);
+            return;
+        }
+        if (es?.emit) es.emit('PERSONA_UPDATED', id);
+    } catch { /* ignore */ }
+}
+
 /**
- * Write description while preserving ST object shape:
- * { description, position, depth, role, title, ... }
- * Also handles legacy string values.
+ * Write ONLY this avatar id.
+ * Never copy edited text onto the currently selected persona unless ids match.
  */
-function persistPersonaDescription(id, description) {
-    if (!power_user) return false;
+function persistPersonaDescription(targetId, description) {
+    const id = String(targetId || '');
+    if (!id || !power_user) {
+        console.error(`[${EXT}] persist blocked: invalid id`, targetId);
+        return false;
+    }
     if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
 
     const prev = power_user.persona_descriptions[id];
@@ -127,62 +159,39 @@ function persistPersonaDescription(id, description) {
         description: nextText,
     };
 
-    // Sync visible ST persona description field if present
-    try {
-        const ta = document.querySelector('#persona_description, textarea[name="persona_description"], #persona-description-textarea');
-        if (ta && typeof ta.value === 'string') {
-            const activeId = power_user.user_avatar || window.user_avatar;
-            if (!activeId || String(activeId) === String(id)) {
+    // Only touch the native textarea when editing the ACTIVE persona
+    const activeId = getActiveAvatarId();
+    if (activeId && activeId === id) {
+        try {
+            const ta = document.querySelector('#persona_description, textarea[name="persona_description"], #persona-description-textarea');
+            if (ta && typeof ta.value === 'string') {
                 ta.value = nextText;
                 ta.dispatchEvent(new Event('input', { bubbles: true }));
                 ta.dispatchEvent(new Event('change', { bubbles: true }));
             }
-        }
-    } catch { /* ignore */ }
+            // Keep global "current description" field in sync only for active
+            if (typeof power_user.persona_description === 'string') {
+                power_user.persona_description = nextText;
+            }
+        } catch { /* ignore */ }
+    }
 
+    console.log(`[${EXT}] wrote description for id=${id} (active=${activeId || 'none'}) len=${nextText.length}`);
     savePowerUserSettings();
     emitPersonaUpdated(id);
     return true;
 }
 
-function persistPersonaFull(id, name, description) {
-    if (!power_user) return false;
+function persistPersonaFull(targetId, name, description) {
+    const id = String(targetId || '');
+    if (!id || !power_user) {
+        console.error(`[${EXT}] persistFull blocked: invalid id`, targetId);
+        return false;
+    }
     if (!power_user.personas) power_user.personas = {};
     power_user.personas[id] = String(name ?? id);
-    persistPersonaDescription(id, description);
-    return true;
-}
-
-function savePowerUserSettings() {
-    try {
-        if (typeof window.saveSettingsDebounced === 'function') {
-            window.saveSettingsDebounced();
-            return;
-        }
-    } catch { /* ignore */ }
-    try {
-        if (typeof window.saveSettings === 'function') {
-            window.saveSettings();
-        }
-    } catch { /* ignore */ }
-}
-
-function emitPersonaUpdated(id) {
-    try {
-        const ctx = window.SillyTavern?.getContext?.();
-        const es = ctx?.eventSource;
-        const types = ctx?.eventTypes || ctx?.event_types;
-        if (es?.emit && types?.PERSONA_UPDATED) {
-            es.emit(types.PERSONA_UPDATED, id);
-            return;
-        }
-        if (es?.emit) {
-            es.emit('PERSONA_UPDATED', id);
-        }
-    } catch { /* ignore */ }
-    try {
-        document.dispatchEvent(new CustomEvent('pmp18-persona-updated', { detail: { id } }));
-    } catch { /* ignore */ }
+    console.log(`[${EXT}] wrote name for id=${id}`);
+    return persistPersonaDescription(id, description);
 }
 
 /* ---------- Grouping / similarity ---------- */
@@ -266,16 +275,16 @@ function statusBadge(persona, all) {
     return '';
 }
 
-/* ---------- Diff: field-aware units + unordered + inline (A+C) ---------- */
+/* ---------- Diff engine ---------- */
 
 function splitUnits(text) {
     const raw = String(text || '').replace(/\r\n?/g, '\n');
     if (!raw.trim()) return [];
-
     const lines = raw.split('\n');
-    const fieldLine = /^\s*[\w\u4e00-\u9fff./_-]+\s*[:：]/.test.bind(/^\s*[\w\u4e00-\u9fff./_-]+\s*[:：]/);
-    const fieldCount = lines.filter(l => fieldLine(l)).length;
-    const useFields = fieldCount >= 3 && fieldCount / Math.max(lines.filter(l => l.trim()).length, 1) >= 0.35;
+    const fieldRe = /^\s*[\w\u4e00-\u9fff./_-]+\s*[:：]/;
+    const nonEmpty = lines.filter(l => l.trim());
+    const fieldCount = nonEmpty.filter(l => fieldRe.test(l)).length;
+    const useFields = fieldCount >= 3 && fieldCount / Math.max(nonEmpty.length, 1) >= 0.35;
 
     if (useFields) {
         const units = [];
@@ -286,7 +295,7 @@ function splitUnits(text) {
             buf = [];
         };
         for (const line of lines) {
-            if (fieldLine(line) && buf.length) flush();
+            if (fieldRe.test(line) && buf.length) flush();
             buf.push(line);
         }
         flush();
@@ -437,57 +446,54 @@ function diffModeClass(score) {
     return 'mode-low';
 }
 
-/** Always run inline on same/replace so small wording diffs are visible (scheme A) */
-function renderColumnBlocks(baseText, otherText, showDiffOnly, isBaselineOnly) {
-    if (isBaselineOnly) {
-        const units = splitUnits(baseText);
-        if (!units.length) return '<div class="pmp18-muted" style="padding:12px">（无描述）</div>';
-        return units.map(u => `<div class="pmp18-col-block">${escapeHtml(u)}</div>`).join('');
-    }
-
+/** Symmetric blocks: side 'base' | 'other' */
+function renderFocusBlocks(baseText, otherText, side, showDiffOnly) {
     const rows = unorderedDiff(baseText, otherText);
     const parts = [];
     for (const row of rows) {
-        if (showDiffOnly && row.type === 'same') {
-            // still show same-blocks that have internal wording diffs
-            if (row.a && row.b && normalizeText(row.a) === normalizeText(row.b)) continue;
-        }
+        const isPureSame = row.type === 'same' && (row.a === row.b || normalizeText(row.a) === normalizeText(row.b));
+        if (showDiffOnly && isPureSame) continue;
+
         if (row.type === 'same') {
-            if (row.a === row.b || normalizeText(row.a) === normalizeText(row.b)) {
-                if (showDiffOnly) continue;
-                parts.push(`<div class="pmp18-col-block same">${escapeHtml(row.b || row.a)}</div>`);
+            if (isPureSame) {
+                parts.push(`<div class="pmp18-col-block same">${escapeHtml(side === 'base' ? row.a : row.b)}</div>`);
             } else {
-                const { right } = inlineDiffHtml(row.a, row.b);
-                parts.push(`<div class="pmp18-col-block replace">${right}</div>`);
+                const { left, right } = inlineDiffHtml(row.a, row.b);
+                parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
             }
         } else if (row.type === 'remove') {
-            parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">基准有</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
+            if (side === 'base') {
+                parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
+            } else {
+                parts.push(`<div class="pmp18-col-block remove pmp18-ghost"><span class="pmp18-tag">基准有 · 对方无</span></div>`);
+            }
         } else if (row.type === 'add') {
-            parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">对方有</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
+            if (side === 'other') {
+                parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
+            } else {
+                parts.push(`<div class="pmp18-col-block add pmp18-ghost"><span class="pmp18-tag">对方有 · 基准无</span></div>`);
+            }
         } else {
             const { left, right } = inlineDiffHtml(row.a, row.b);
-            parts.push(`<div class="pmp18-col-block replace">
-                <div class="pmp18-rev-line"><span class="pmp18-tag">基准</span>${left}</div>
-                <div class="pmp18-rev-line"><span class="pmp18-tag">对方</span>${right}</div>
-            </div>`);
+            parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
         }
     }
-    return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无差异或已全部过滤</div>';
+    return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无内容</div>';
 }
 
-/* ---------- UI: cards / lists ---------- */
+/* ---------- UI lists ---------- */
 
 function renderCard(persona, all) {
     const checked = state.selected.has(persona.id);
     return `
         <article class="pmp18-card ${checked ? 'is-selected' : ''}" data-persona-id="${escapeHtml(persona.id)}">
-            <label class="pmp18-check" title="选择以参与对比">
-                <input type="checkbox" data-action="select" ${checked ? 'checked' : ''}>
+            <label class="pmp18-check">
+                <input type="checkbox" data-action="select" data-id="${escapeHtml(persona.id)}" ${checked ? 'checked' : ''}>
             </label>
             ${renderAvatar(persona)}
             <div class="pmp18-card-main">
                 <div class="pmp18-card-title-row">
-                    <div class="pmp18-card-name" title="${escapeHtml(persona.name)}">${escapeHtml(persona.name)}</div>
+                    <div class="pmp18-card-name">${escapeHtml(persona.name)}</div>
                     ${statusBadge(persona, all)}
                 </div>
                 <div class="pmp18-card-id">ID：${escapeHtml(persona.id)}</div>
@@ -504,14 +510,14 @@ function renderGroup(group, title, all) {
         <section class="pmp18-group">
             <div class="pmp18-group-head">
                 <div><div class="pmp18-group-title">${escapeHtml(title)}</div><div class="pmp18-group-count">${group.length} 个</div></div>
-                <button class="pmp18-small-btn" type="button" data-action="select-group" data-ids="${escapeHtml(group.map(x => x.id).join('|'))}">全选此组</button>
+                <button class="pmp18-small-btn" type="button" data-action="select-group" data-ids="${escapeHtml(group.map(x => x.id).join('|'))}">全选</button>
             </div>
             <div class="pmp18-group-grid">${group.map(p => renderCard(p, all)).join('')}</div>
         </section>`;
 }
 
 function emptyState(title, text) {
-    return `<div class="pmp18-empty"><i class="fa-solid fa-magnifying-glass"></i><strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span></div>`;
+    return `<div class="pmp18-empty"><i class="fa-solid fa-magnifying-glass"></i><strong>${escapeHtml(title)}</strong><span>${escapeHtml(text || '')}</span></div>`;
 }
 
 function searchMatch(persona, query) {
@@ -523,24 +529,24 @@ function renderAllView(personas) {
     const filtered = personas.filter(p => searchMatch(p, state.query));
     return filtered.length
         ? `<div class="pmp18-card-grid">${filtered.map(p => renderCard(p, personas)).join('')}</div>`
-        : emptyState(state.query ? '没有匹配' : '没有 Persona', '检查是否已创建用户设定中的 Persona。');
+        : emptyState(state.query ? '没有匹配' : '没有 Persona', '');
 }
 
 function renderSameNameView(personas) {
     const groups = getSameNameGroups(personas).map(g => g.filter(p => searchMatch(p, state.query))).filter(g => g.length > 1);
-    return groups.length ? groups.map(g => renderGroup(g, g[0].name, personas)).join('') : emptyState('没有同名 Persona', '');
+    return groups.length ? groups.map(g => renderGroup(g, g[0].name, personas)).join('') : emptyState('没有同名', '');
 }
 
 function renderDuplicateView(personas) {
     const groups = getExactDuplicateGroups(personas).map(g => g.filter(p => searchMatch(p, state.query))).filter(g => g.length > 1);
-    return groups.length ? groups.map((g, i) => renderGroup(g, `重复组 ${i + 1}`, personas)).join('') : emptyState('没有完全重复', '名称与描述均一致才会列入。');
+    return groups.length ? groups.map((g, i) => renderGroup(g, `重复组 ${i + 1}`, personas)).join('') : emptyState('没有完全重复', '');
 }
 
 function renderSimilarView(personas) {
     const q = normalizeText(state.query);
     const pairs = getSimilarPairs(personas).filter(({ a, b }) => !q || searchMatch(a, q) || searchMatch(b, q));
     if (!pairs.length) {
-        return emptyState('没有高度相似', `阈值 ${Math.round(state.settings.similarityThreshold * 100)}% · 同名${state.settings.includeSameNameInSimilar ? '已纳入' : '已排除'}`);
+        return emptyState('没有高度相似', `阈值 ${Math.round(state.settings.similarityThreshold * 100)}%`);
     }
     return `<div class="pmp18-similar-list">${pairs.map(({ a, b, score }) => `
         <section class="pmp18-similar-pair">
@@ -550,52 +556,44 @@ function renderSimilarView(personas) {
                 <button class="pmp18-small-btn" data-action="compare-pair" data-a="${escapeHtml(a.id)}" data-b="${escapeHtml(b.id)}">对比</button>
             </div>
             <div class="pmp18-compare-mini">
-                <div class="pmp18-mini">${renderAvatar(a)}<div><strong>${escapeHtml(a.name)}</strong><p>${escapeHtml((a.description || '').slice(0, 160))}</p></div></div>
-                <div class="pmp18-mini">${renderAvatar(b)}<div><strong>${escapeHtml(b.name)}</strong><p>${escapeHtml((b.description || '').slice(0, 160))}</p></div></div>
+                <div class="pmp18-mini">${renderAvatar(a)}<div><strong>${escapeHtml(a.name)}</strong></div></div>
+                <div class="pmp18-mini">${renderAvatar(b)}<div><strong>${escapeHtml(b.name)}</strong></div></div>
             </div>
         </section>`).join('')}</div>`;
 }
 
+/** Focus compare: baseline + one other */
 function renderCompareWorkspace(personas) {
     const ids = state.compareIds.filter(id => personas.some(p => p.id === id));
     if (ids.length < 2) {
         state.compareIds = [];
         state.baselineId = null;
+        state.focusOtherId = null;
         return renderManagerContent(personas);
     }
     if (!state.baselineId || !ids.includes(state.baselineId)) state.baselineId = ids[0];
+    const others = ids.filter(id => id !== state.baselineId);
+    if (!state.focusOtherId || !others.includes(state.focusOtherId)) state.focusOtherId = others[0];
 
     const base = personas.find(p => p.id === state.baselineId);
-    const others = ids.filter(id => id !== state.baselineId).map(id => personas.find(p => p.id === id)).filter(Boolean);
+    const other = personas.find(p => p.id === state.focusOtherId);
+    if (!base || !other) return emptyState('对比数据无效', '');
+
+    const score = similarity(base.description, other.description);
+    const stats = countPairStats(unorderedDiff(base.description, other.description));
+    const mode = diffModeClass(score);
     const showDiffOnly = state.settings.showDiffOnly;
 
-    const baselineButtons = ids.map(id => {
+    const baselineBtns = ids.map(id => {
         const p = personas.find(x => x.id === id);
         if (!p) return '';
         return `<button type="button" class="pmp18-base-btn ${id === state.baselineId ? 'is-active' : ''}" data-action="set-baseline" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
     }).join('');
 
-    const otherCols = others.map(o => {
-        const score = similarity(base.description, o.description);
-        const stats = countPairStats(unorderedDiff(base.description, o.description));
-        const mode = diffModeClass(score);
-        return `
-            <section class="pmp18-hcol pmp18-hcol-other ${mode}">
-                <div class="pmp18-hcol-head">
-                    <div class="pmp18-pair-person">
-                        ${renderAvatar(o)}
-                        <div>
-                            <strong title="${escapeHtml(o.name)}">${escapeHtml(o.name)}</strong>
-                            <span>对比 · ${Math.round(score * 100)}%</span>
-                        </div>
-                        <button type="button" class="pmp18-icon-btn" data-action="edit-full" data-id="${escapeHtml(o.id)}"><i class="fa-solid fa-pen"></i></button>
-                    </div>
-                    <div class="pmp18-pair-stats">
-                        <span>同 ${stats.same}</span><span>改 ${stats.replace}</span><span>− ${stats.remove}</span><span>+ ${stats.add}</span>
-                    </div>
-                </div>
-                <div class="pmp18-hcol-body">${renderColumnBlocks(base.description, o.description, showDiffOnly, false)}</div>
-            </section>`;
+    const otherBtns = others.map(id => {
+        const p = personas.find(x => x.id === id);
+        if (!p) return '';
+        return `<button type="button" class="pmp18-base-btn ${id === state.focusOtherId ? 'is-active' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}">${escapeHtml(p.name)}</button>`;
     }).join('');
 
     return `
@@ -603,35 +601,50 @@ function renderCompareWorkspace(personas) {
             <div class="pmp18-compare-topbar">
                 <button type="button" class="pmp18-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回</button>
                 <div class="pmp18-compare-title">
-                    <strong>Persona 对比</strong>
-                    <span>共 ${ids.length} 个 · 左基准固定 · 右可横滑</span>
+                    <strong>细比 · ${Math.round(score * 100)}%</strong>
+                    <span>同 ${stats.same} · 改 ${stats.replace} · 仅基准 ${stats.remove} · 仅对方 ${stats.add}</span>
                 </div>
                 <div class="pmp18-compare-tools">
                     <button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>
-                    <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}"><i class="fa-solid fa-pen"></i> 编辑基准</button>
+                    <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}">编辑基准</button>
+                    <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(other.id)}">编辑对方</button>
                 </div>
             </div>
             <div class="pmp18-baseline-bar">
-                <span class="pmp18-baseline-label">基准：</span>
-                <div class="pmp18-baseline-list">${baselineButtons}</div>
+                <span class="pmp18-baseline-label">基准</span>
+                <div class="pmp18-baseline-list">${baselineBtns}</div>
             </div>
-            <div class="pmp18-hscroll-wrap">
+            <div class="pmp18-baseline-bar">
+                <span class="pmp18-baseline-label">对方</span>
+                <div class="pmp18-baseline-list">${otherBtns}</div>
+            </div>
+            <div class="pmp18-focus-wrap ${mode}">
                 <section class="pmp18-hcol pmp18-hcol-base">
                     <div class="pmp18-hcol-head">
                         <div class="pmp18-pair-person">
                             ${renderAvatar(base)}
-                            <div><strong>${escapeHtml(base.name)}</strong><span>基准（固定）</span></div>
+                            <div><strong>${escapeHtml(base.name)}</strong><span>基准</span></div>
                         </div>
                     </div>
-                    <div class="pmp18-hcol-body">${renderColumnBlocks(base.description, '', false, true)}</div>
+                    <div class="pmp18-hcol-body">${renderFocusBlocks(base.description, other.description, 'base', showDiffOnly)}</div>
                 </section>
-                <div class="pmp18-hscroll">${otherCols}</div>
+                <section class="pmp18-hcol pmp18-hcol-other">
+                    <div class="pmp18-hcol-head">
+                        <div class="pmp18-pair-person">
+                            ${renderAvatar(other)}
+                            <div><strong>${escapeHtml(other.name)}</strong><span>对方</span></div>
+                        </div>
+                    </div>
+                    <div class="pmp18-hcol-body">${renderFocusBlocks(base.description, other.description, 'other', showDiffOnly)}</div>
+                </section>
             </div>
         </div>`;
 }
 
 function tabButton(key, label, icon, count) {
-    const extra = key === 'settings' && state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : (typeof count === 'number' ? `<em>${count}</em>` : '');
+    const extra = key === 'settings' && state.updateInfo?.available
+        ? '<em class="pmp18-new">NEW</em>'
+        : (typeof count === 'number' ? `<em>${count}</em>` : '');
     return `<button class="pmp18-tab ${state.tab === key ? 'is-active' : ''}" type="button" data-action="tab" data-tab="${key}"><i class="fa-solid ${icon}"></i><span>${label}</span>${extra}</button>`;
 }
 
@@ -639,14 +652,51 @@ function renderSettingsPanel() {
     const t = Math.round(state.settings.similarityThreshold * 100);
     const soft = Math.round((state.settings.softMatchThreshold ?? 0.35) * 100);
     const upd = state.updateInfo;
-    let updateBlock = `<div class="pmp18-update-box"><span>当前版本 v${VERSION}</span><button type="button" class="pmp18-small-btn" data-action="check-update">检查更新</button></div>`;
-    if (upd?.available) {
-        updateBlock = `<div class="pmp18-update-box is-new">
-            <div><b>发现新版本</b> v${escapeHtml(String(upd.remoteVersion || ''))}</div>
-            <button type="button" class="pmp18-primary-btn" data-action="show-update-modal">查看更新</button>
+    let updateBlock = `
+        <div class="pmp18-update-box" id="pmp18-update-box">
+            <div>
+                <div><b>当前版本</b> v${VERSION}</div>
+                <div class="pmp18-muted" id="pmp18-update-status">点击检查更新</div>
+            </div>
+            <button type="button" class="pmp18-small-btn" data-action="check-update" id="pmp18-check-btn">检查更新</button>
         </div>`;
-    } else if (upd && upd.checked) {
-        updateBlock = `<div class="pmp18-update-box"><span>已是最新版本 v${VERSION}</span><button type="button" class="pmp18-small-btn" data-action="check-update">重新检查</button></div>`;
+
+    if (upd?.checking) {
+        updateBlock = `
+        <div class="pmp18-update-box">
+            <div><b>当前版本</b> v${VERSION}<div class="pmp18-muted">正在检查…</div></div>
+            <button type="button" class="pmp18-small-btn" disabled>检查中…</button>
+        </div>`;
+    } else if (upd?.available) {
+        updateBlock = `
+        <div class="pmp18-update-box is-new">
+            <div>
+                <div><b>发现新版本</b> v${escapeHtml(String(upd.remoteVersion || ''))}</div>
+                <div class="pmp18-muted">当前 v${VERSION}</div>
+            </div>
+            <button type="button" class="pmp18-primary-btn" data-action="show-update-modal">查看日志并更新</button>
+        </div>`;
+    } else if (upd?.checked && !upd.error) {
+        updateBlock = `
+        <div class="pmp18-update-box">
+            <div>
+                <div><b>已是最新版本</b> v${VERSION}</div>
+                <div class="pmp18-muted">可查看更新日志</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" class="pmp18-small-btn" data-action="show-update-modal">更新日志</button>
+                <button type="button" class="pmp18-small-btn" data-action="check-update">重新检查</button>
+            </div>
+        </div>`;
+    } else if (upd?.error) {
+        updateBlock = `
+        <div class="pmp18-update-box">
+            <div>
+                <div><b>当前版本</b> v${VERSION}</div>
+                <div class="pmp18-muted">无法连接更新源</div>
+            </div>
+            <button type="button" class="pmp18-small-btn" data-action="check-update">重试</button>
+        </div>`;
     }
 
     return `
@@ -659,15 +709,13 @@ function renderSettingsPanel() {
             <div class="pmp18-settings-row">
                 <label>段落匹配敏感度 <b id="pmp18-soft-val">${soft}%</b></label>
                 <input type="range" id="pmp18-soft" min="20" max="70" step="5" value="${soft}">
-                <span class="pmp18-muted">越低越容易把不同段落判为「修改」而非「删除+新增」</span>
             </div>
             <div class="pmp18-settings-row">
                 <label class="pmp18-check-label">
                     <input type="checkbox" id="pmp18-same-name" ${state.settings.includeSameNameInSimilar ? 'checked' : ''}>
-                    同名 Persona 也参与「高度相似」检测
+                    同名也参与「高度相似」检测
                 </label>
             </div>
-            <pre class="pmp18-changelog">${escapeHtml(CHANGELOG)}</pre>
         </div>`;
 }
 
@@ -685,13 +733,13 @@ function renderManager() {
     const personas = getPersonaData();
     const sameNameGroups = getSameNameGroups(personas);
     const duplicateGroups = getExactDuplicateGroups(personas);
-    const similarPairs = getSimilarPairs(personas);
+    const similarCount = state.tab === 'similar' ? getSimilarPairs(personas).length : 0;
     const inCompare = state.compareIds.length >= 2;
 
     const selectionHint = state.selected.size >= 2
         ? `<div class="pmp18-selection-bar">
-            <div><strong>已选 ${state.selected.size} 个</strong><span>默认以选择顺序第一个为基准，对比中可切换</span></div>
-            <button class="pmp18-primary-btn" data-action="compare-selected"><i class="fa-solid fa-code-compare"></i> 开始对比</button>
+            <div><strong>已选 ${state.selected.size} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
+            <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
             <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
            </div>`
         : state.selected.size === 1
@@ -706,52 +754,54 @@ function renderManager() {
                     <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
                     <div><h1>Persona Manager</h1><span>v${VERSION}</span></div>
                 </div>
-                <button class="pmp18-close" type="button" data-action="close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+                <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
             </header>
             ${inCompare ? renderCompareWorkspace(personas) : `
             <div class="pmp18-toolbar">
                 <div class="pmp18-search">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input id="pmp18-search" type="search" value="${escapeHtml(state.query)}" placeholder="搜索名称或描述…" autocomplete="off">
+                    <input id="pmp18-search" type="search" value="${escapeHtml(state.query)}" placeholder="搜索…" autocomplete="off">
                     ${state.query ? '<button data-action="clear-search"><i class="fa-solid fa-xmark"></i></button>' : ''}
                 </div>
                 <div class="pmp18-stats">
                     <span><b>${personas.length}</b> 全部</span>
                     <span><b>${sameNameGroups.length}</b> 同名</span>
                     <span><b>${duplicateGroups.length}</b> 重复</span>
-                    <span><b>${similarPairs.length}</b> 相似</span>
+                    ${state.tab === 'similar' ? `<span><b>${similarCount}</b> 相似</span>` : ''}
                 </div>
             </div>
             <nav class="pmp18-tabs">
                 ${tabButton('all', '全部', 'fa-layer-group')}
                 ${tabButton('same-name', '同名', 'fa-people-group', sameNameGroups.length)}
                 ${tabButton('duplicates', '完全重复', 'fa-copy', duplicateGroups.length)}
-                ${tabButton('similar', '高度相似', 'fa-clone', similarPairs.length)}
+                ${tabButton('similar', '高度相似', 'fa-clone')}
                 ${tabButton('settings', '设置', 'fa-sliders')}
             </nav>
             <main class="pmp18-content">${renderManagerContent(personas)}</main>
             ${selectionHint}`}
         </section>`;
-
-    const input = document.getElementById('pmp18-search');
-    if (input && document.activeElement !== input) {
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-    }
 }
 
-/* ---------- Editors ---------- */
+/* ---------- Editor (id locked at open) ---------- */
 
-function openFullEditor(id) {
+function openFullEditor(rawId) {
+    const id = String(rawId || '');
     const p = getPersonaData().find(x => x.id === id);
-    if (!p) return;
+    if (!p) {
+        console.error(`[${EXT}] editor: persona not found`, rawId);
+        return;
+    }
+    // Freeze id for this editor session
+    const lockedId = p.id;
 
     const overlay = document.createElement('div');
     overlay.className = 'pmp18-editor-overlay';
+    overlay.dataset.editId = lockedId;
     overlay.innerHTML = `
         <div class="pmp18-editor">
             <div class="pmp18-editor-head">
                 <strong>编辑 Persona</strong>
+                <span class="pmp18-muted">${escapeHtml(lockedId)}</span>
                 <button type="button" class="pmp18-close pmp18-editor-close"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <label class="pmp18-editor-label">显示名称</label>
@@ -762,7 +812,7 @@ function openFullEditor(id) {
                 <button type="button" class="pmp18-small-btn pmp18-editor-cancel">取消</button>
                 <button type="button" class="pmp18-primary-btn pmp18-editor-save">保存</button>
             </div>
-            <p class="pmp18-editor-note">将写回酒馆 Persona 数据（保留 position 等字段）。</p>
+            <p class="pmp18-editor-note">仅写入 ID：${escapeHtml(lockedId)}，不会修改其他人设。</p>
         </div>`;
 
     const close = () => overlay.remove();
@@ -772,87 +822,115 @@ function openFullEditor(id) {
     overlay.querySelector('.pmp18-editor-save').onclick = () => {
         const newName = overlay.querySelector('.pmp18-editor-name').value.trim() || p.name;
         const newDesc = overlay.querySelector('.pmp18-editor-ta').value;
+        const stillId = overlay.dataset.editId;
+        if (stillId !== lockedId) {
+            console.error(`[${EXT}] editor id mismatch`, stillId, lockedId);
+            if (typeof toastr !== 'undefined') toastr.error('保存中止：目标 ID 异常');
+            return;
+        }
         if (newName === p.name && newDesc === p.description) {
             close();
             return;
         }
-        if (!window.confirm('确认写回原 Persona？')) return;
-        persistPersonaFull(id, newName, newDesc);
+        if (!window.confirm(`确认写回「${p.name}」？\nID: ${lockedId}`)) return;
+        const ok = persistPersonaFull(lockedId, newName, newDesc);
         close();
-        if (typeof toastr !== 'undefined') toastr.success('已保存 Persona');
+        if (ok && typeof toastr !== 'undefined') toastr.success(`已保存：${newName}`);
         renderManager();
     };
     document.body.appendChild(overlay);
-    overlay.querySelector('.pmp18-editor-name').focus();
 }
 
-/* ---------- Update check ---------- */
+/* ---------- Updates (remote manifest + CHANGELOG.md) ---------- */
+
+async function fetchText(url) {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.text();
+}
 
 async function checkForUpdates() {
+    state.updateInfo = { checking: true };
+    if (state.tab === 'settings') renderManager();
     try {
-        const r = await fetch('https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json', { cache: 'no-store' });
-        if (!r.ok) throw new Error(String(r.status));
-        const remote = await r.json();
+        const text = await fetchText(REMOTE_MANIFEST);
+        const remote = JSON.parse(text);
         const rv = String(remote.version || '');
         const available = Boolean(rv && rv !== VERSION);
-        state.updateInfo = { checked: true, available, remoteVersion: rv, description: remote.description || '' };
-        return state.updateInfo;
-    } catch {
-        state.updateInfo = { checked: true, available: false, error: true };
-        return state.updateInfo;
+        let changelog = '';
+        try {
+            changelog = await fetchText(REMOTE_CHANGELOG);
+        } catch {
+            changelog = remote.description || '（无法获取 CHANGELOG.md）';
+        }
+        state.updateInfo = {
+            checked: true,
+            available,
+            remoteVersion: rv,
+            changelog,
+            error: false,
+        };
+    } catch (e) {
+        state.updateInfo = { checked: true, available: false, error: true, message: e?.message || String(e) };
     }
+    if (state.tab === 'settings' || state.active) renderManager();
+    return state.updateInfo;
 }
 
 function showUpdateModal() {
-    const info = state.updateInfo;
+    const info = state.updateInfo || {};
+    const log = info.changelog || '暂无日志。请确认仓库中存在 CHANGELOG.md。';
+    const available = Boolean(info.available);
     const overlay = document.createElement('div');
     overlay.className = 'pmp18-editor-overlay';
     overlay.innerHTML = `
-        <div class="pmp18-editor" style="max-width:520px">
+        <div class="pmp18-editor" style="max-width:560px">
             <div class="pmp18-editor-head">
-                <strong>版本更新</strong>
+                <strong>${available ? '发现新版本' : '更新日志'}</strong>
                 <button type="button" class="pmp18-close pmp18-editor-close"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <p>当前 <b>v${VERSION}</b>${info?.remoteVersion ? ` → 最新 <b>v${escapeHtml(info.remoteVersion)}</b>` : ''}</p>
-            <pre class="pmp18-changelog">${escapeHtml(info?.description || CHANGELOG)}</pre>
+            <p>当前 <b>v${VERSION}</b>${info.remoteVersion ? ` · 远程 <b>v${escapeHtml(String(info.remoteVersion))}</b>` : ''}
+            ${available ? '' : ' · <span style="color:#3c9764">已是最新</span>'}</p>
+            <pre class="pmp18-changelog">${escapeHtml(log)}</pre>
             <div class="pmp18-editor-actions">
-                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">稍后</button>
-                <button type="button" class="pmp18-primary-btn pmp18-do-update">立即更新</button>
+                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">关闭</button>
+                ${available ? '<button type="button" class="pmp18-primary-btn pmp18-do-update">立即更新</button>' : ''}
             </div>
-            <p class="pmp18-editor-note">将调用扩展更新接口；若失败请到「管理扩展」中手动更新。</p>
         </div>`;
     const close = () => overlay.remove();
     overlay.querySelector('.pmp18-editor-close').onclick = close;
     overlay.querySelector('.pmp18-editor-cancel').onclick = close;
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    overlay.querySelector('.pmp18-do-update').onclick = async () => {
-        const btn = overlay.querySelector('.pmp18-do-update');
-        btn.disabled = true;
-        btn.textContent = '更新中…';
-        try {
-            if (typeof window.updateExtension === 'function') {
-                await window.updateExtension('persona-manager');
-            } else {
-                const res = await fetch('/api/extensions/update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ extensionName: 'persona-manager', global: false }),
-                });
-                if (!res.ok) throw new Error(await res.text());
+    const doBtn = overlay.querySelector('.pmp18-do-update');
+    if (doBtn) {
+        doBtn.onclick = async () => {
+            doBtn.disabled = true;
+            doBtn.textContent = '更新中…';
+            try {
+                if (typeof window.updateExtension === 'function') {
+                    await window.updateExtension('persona-manager');
+                } else {
+                    const res = await fetch('/api/extensions/update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ extensionName: 'persona-manager', global: false }),
+                    });
+                    if (!res.ok) throw new Error(await res.text());
+                }
+                doBtn.textContent = '完成，正在刷新…';
+                setTimeout(() => location.reload(), 500);
+            } catch (e) {
+                doBtn.disabled = false;
+                doBtn.textContent = '立即更新';
+                if (typeof toastr !== 'undefined') toastr.error(`更新失败：${e?.message || e}`);
             }
-            btn.textContent = '完成，刷新中…';
-            setTimeout(() => location.reload(), 600);
-        } catch (e) {
-            btn.disabled = false;
-            btn.textContent = '立即更新';
-            if (typeof toastr !== 'undefined') toastr.error(`更新失败：${e?.message || e}`);
-        }
-    };
+        };
+    }
     document.body.appendChild(overlay);
 }
 
-/* ---------- Root / events ---------- */
+/* ---------- Root events ---------- */
 
 function ensureRoot() {
     let root = document.getElementById(ROOT_ID);
@@ -879,28 +957,32 @@ function ensureRoot() {
             state.selected.clear();
             state.compareIds = [];
             state.baselineId = null;
+            state.focusOtherId = null;
+            if (state.tab === 'settings' && !state.updateInfo?.checked) checkForUpdates();
             renderManager();
             return;
         }
         if (action === 'clear-search') { state.query = ''; renderManager(); return; }
         if (action === 'clear-selection') { state.selected.clear(); renderManager(); return; }
         if (action === 'select-group') {
-            for (const id of (target.dataset.ids || '').split('|').filter(Boolean)) state.selected.add(id);
+            for (const id of (target.dataset.ids || '').split('|').filter(Boolean)) state.selected.add(String(id));
             renderManager();
             return;
         }
         if (action === 'compare-pair') {
-            state.compareIds = [target.dataset.a, target.dataset.b];
-            state.baselineId = target.dataset.a;
+            state.compareIds = [String(target.dataset.a), String(target.dataset.b)];
+            state.baselineId = String(target.dataset.a);
+            state.focusOtherId = String(target.dataset.b);
             state.selected.clear();
             renderManager();
             return;
         }
         if (action === 'compare-selected') {
-            const ids = [...state.selected];
+            const ids = [...state.selected].map(String);
             if (ids.length < 2) return;
             state.compareIds = ids;
             state.baselineId = ids[0];
+            state.focusOtherId = ids[1];
             state.selected.clear();
             renderManager();
             return;
@@ -908,11 +990,22 @@ function ensureRoot() {
         if (action === 'exit-compare') {
             state.compareIds = [];
             state.baselineId = null;
+            state.focusOtherId = null;
             renderManager();
             return;
         }
         if (action === 'set-baseline') {
-            state.baselineId = target.dataset.id;
+            const id = String(target.dataset.id);
+            state.baselineId = id;
+            if (state.focusOtherId === id) {
+                const other = state.compareIds.find(x => x !== id);
+                if (other) state.focusOtherId = other;
+            }
+            renderManager();
+            return;
+        }
+        if (action === 'set-focus-other') {
+            state.focusOtherId = String(target.dataset.id);
             renderManager();
             return;
         }
@@ -923,15 +1016,17 @@ function ensureRoot() {
             return;
         }
         if (action === 'edit-full') {
-            openFullEditor(target.dataset.id);
+            openFullEditor(String(target.dataset.id || ''));
             return;
         }
         if (action === 'check-update') {
-            checkForUpdates().then(() => renderManager());
+            checkForUpdates();
             return;
         }
         if (action === 'show-update-modal') {
-            showUpdateModal();
+            if (!state.updateInfo?.changelog && !state.updateInfo?.checking) {
+                checkForUpdates().then(() => showUpdateModal());
+            } else showUpdateModal();
             return;
         }
     });
@@ -939,10 +1034,10 @@ function ensureRoot() {
     root.addEventListener('change', event => {
         const input = event.target.closest('input[data-action="select"]');
         if (input) {
-            const card = input.closest('[data-persona-id]');
-            if (!card) return;
-            if (input.checked) state.selected.add(card.dataset.personaId);
-            else state.selected.delete(card.dataset.personaId);
+            const id = String(input.dataset.id || input.closest('[data-persona-id]')?.dataset?.personaId || '');
+            if (!id) return;
+            if (input.checked) state.selected.add(id);
+            else state.selected.delete(id);
             renderManager();
             return;
         }
@@ -985,6 +1080,7 @@ function openManager(tab = 'all') {
     state.selected.clear();
     state.compareIds = [];
     state.baselineId = null;
+    state.focusOtherId = null;
     const root = document.getElementById(ROOT_ID);
     root.hidden = false;
     document.body.classList.add('pmp18-open');
@@ -996,14 +1092,13 @@ function closeManager() {
     state.selected.clear();
     state.compareIds = [];
     state.baselineId = null;
+    state.focusOtherId = null;
     const root = document.getElementById(ROOT_ID);
     if (root) root.hidden = true;
     document.body.classList.remove('pmp18-open');
 }
 
-/* ---------- Entry (single path, low overhead) ---------- */
-
-const ENTRY_TEXTS = ['用户设置', 'User Settings', '全局设置', 'Global Settings', 'Persona Management', 'Persona 管理'];
+/* ---------- Entry ---------- */
 
 function findEntryAnchor() {
     for (const id of ['persona-management-block', 'user-settings-block-content', 'user-settings-block']) {
@@ -1012,10 +1107,11 @@ function findEntryAnchor() {
     }
     const col = document.querySelector('.persona_management_left_column, .persona_management_global_settings');
     if (col) return { type: 'container', node: col };
-
     for (const el of document.querySelectorAll('h3,h2,h4,.inline-drawer-header')) {
         const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (ENTRY_TEXTS.some(t => text === t)) return { type: 'heading', node: el };
+        if (text === '用户设置' || text === 'User Settings' || text === '全局设置' || text === 'Global Settings') {
+            return { type: 'heading', node: el };
+        }
     }
     return null;
 }
@@ -1050,7 +1146,7 @@ function injectEntry() {
 function injectFloatingEntry() {
     if (document.getElementById(BUTTON_ID)) return true;
     document.body.appendChild(makeEntry(true));
-    console.warn(`[${EXT}] 使用浮动入口。也可执行 openPersonaManager()`);
+    console.warn(`[${EXT}] 浮动入口。也可 openPersonaManager()`);
     return true;
 }
 
@@ -1072,9 +1168,7 @@ function installEntryObserver() {
         }
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    window.__pmp18Observer = observer;
 
-    // Limited retries only (no perpetual click capture)
     window.__pmp18EntryTimer = setInterval(() => {
         ticks += 1;
         if (injectEntry()) {
@@ -1091,13 +1185,8 @@ function installEntryObserver() {
         }
     }, 400);
 
-    // One-shot retry when user opens persona / user-settings drawers
-    document.getElementById('persona-management-button')?.addEventListener('click', () => {
-        setTimeout(() => injectEntry(), 200);
-    });
-    document.getElementById('user-settings-button')?.addEventListener('click', () => {
-        setTimeout(() => injectEntry(), 200);
-    });
+    document.getElementById('persona-management-button')?.addEventListener('click', () => setTimeout(injectEntry, 200));
+    document.getElementById('user-settings-button')?.addEventListener('click', () => setTimeout(injectEntry, 200));
 }
 
 function installKeyboardHandler() {
@@ -1105,10 +1194,7 @@ function installKeyboardHandler() {
     window.__pmp18Keyboard = true;
     document.addEventListener('keydown', event => {
         if (!state.active) return;
-        if (event.key === 'Escape') {
-            if (document.querySelector('.pmp18-editor-overlay')) return;
-            closeManager();
-        }
+        if (event.key === 'Escape' && !document.querySelector('.pmp18-editor-overlay')) closeManager();
     });
 }
 
@@ -1116,7 +1202,6 @@ async function init() {
     ensureRoot();
     installKeyboardHandler();
     installEntryObserver();
-    checkForUpdates().catch(() => {});
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
 
