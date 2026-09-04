@@ -117,9 +117,33 @@ function personaImageUrl(id) {
 }
 
 function findGlobalSettings() {
-    const nodes = [...document.querySelectorAll('div, section, h3, h4, label, span')];
-    const hit = nodes.find(el => el.children.length < 3 && normalize(el.textContent) === '全局设置');
-    return hit || null;
+    // Prefer exact visible text, then walk upward to the smallest useful settings block.
+    const candidates = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    let node;
+    while ((node = walker.nextNode())) {
+        if (normalize(node.textContent) !== '全局设置') continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue;
+        candidates.push(node);
+    }
+    if (!candidates.length) return null;
+
+    candidates.sort((a, b) => {
+        const area = el => {
+            const r = el.getBoundingClientRect();
+            return r.width * r.height;
+        };
+        return area(a) - area(b);
+    });
+    return candidates[0];
+}
+
+function getSettingsBlock(anchor) {
+    if (!anchor) return null;
+    return anchor.closest(
+        '.inline-drawer, .inline-drawer-toggle, .settings-item, .range-block, .form-group, .flex-container'
+    ) || anchor.parentElement;
 }
 
 function createEntry() {
@@ -133,17 +157,22 @@ function createEntry() {
         <span><strong>Persona Manager</strong><small>管理、搜索、比较 Persona</small></span>
       </button>`;
     entry.querySelector('button').addEventListener('click', openManager);
+    // The entry exists immediately; it will be moved into the Persona settings area
+    // as soon as SillyTavern renders that area.
     document.body.appendChild(entry);
 }
 
 function mountEntry() {
     const entry = document.querySelector('#persona-manager-entry');
     const anchor = findGlobalSettings();
-    if (!entry || !anchor) return false;
-    const container = anchor.closest('.inline-drawer, .range-block, .settings-item, .flex-container, .form-group') || anchor.parentElement;
-    if (!container?.parentElement) return false;
-    if (entry.parentElement !== container.parentElement || entry.nextElementSibling !== container) {
-        container.parentElement.insertBefore(entry, container);
+    const block = getSettingsBlock(anchor);
+    if (!entry || !block || !block.parentElement) return false;
+
+    // Avoid accidentally nesting into itself.
+    if (entry === block || entry.contains(block)) return false;
+
+    if (entry.parentElement !== block.parentElement || entry.nextElementSibling !== block) {
+        block.parentElement.insertBefore(entry, block);
     }
     entry.classList.add('mounted');
     mounted = true;
@@ -152,12 +181,57 @@ function mountEntry() {
 
 function boot() {
     createEntry();
+
+    // Try immediately. If the Persona settings panel is rendered later,
+    // keep the watcher alive; it is disconnected as soon as the target appears.
     if (mountEntry()) return;
+
     const observer = new MutationObserver(() => {
         if (mountEntry()) observer.disconnect();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => observer.disconnect(), 30000);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    // Some ST UI transitions do not produce a useful mutation at the exact moment
+    // the panel becomes visible, so keep a very cheap fallback check.
+    const timer = setInterval(() => {
+        if (mountEntry()) {
+            clearInterval(timer);
+            observer.disconnect();
+        }
+    }, 750);
+
+    window.addEventListener('beforeunload', () => {
+        clearInterval(timer);
+        observer.disconnect();
+    }, { once: true });
+}
+
+function startVersionWatcher() {
+    // When SillyTavern's Extension Manager updates this extension, the currently
+    // loaded JS can still be the old version until the page is refreshed. Detect
+    // the new local manifest and refresh once automatically.
+    let lastSeen = VERSION;
+    const manifestUrl = new URL('./manifest.json', import.meta.url).href;
+
+    const check = async () => {
+        try {
+            const response = await fetch(`${manifestUrl}?pm_version_check=${Date.now()}`, {
+                cache: 'no-store',
+                credentials: 'same-origin',
+            });
+            if (!response.ok) return;
+            const manifest = await response.json();
+            const next = String(manifest?.version || '');
+            if (next && next !== lastSeen) {
+                lastSeen = next;
+                location.reload();
+            }
+        } catch {}
+    };
+
+    setTimeout(check, 5000);
+    const timer = setInterval(check, 30000);
+    window.addEventListener('beforeunload', () => clearInterval(timer), { once: true });
 }
 
 function refreshData() {
@@ -388,3 +462,4 @@ document.addEventListener('keydown', e => {
 });
 
 boot();
+startVersionWatcher();

@@ -1,36 +1,86 @@
-# Persona Manager v1.5.0
+# Persona Manager v1.5.1
 
 SillyTavern Persona 管理扩展。
 
-## 本版重点
+## 功能
 
-- 启动时立即创建入口，不等待 Persona 数据加载；只在“全局设置”出现后把入口挂到其上方。
-- 点击 Manager 后才读取 Persona 数据。
-- 正确兼容 `persona_descriptions[id].description`。
-- 多选 Persona 后可进行 2 个或多个 Persona 对比。
-- 对比采用全文分段扫描与相似度匹配，不依赖原始前后顺序。
-- 相同/差异/独有内容分类。
-- 点击匹配项可展开原 Persona 内容并编辑。
-- 保存后直接写回 SillyTavern Persona 描述，并重新计算对比。
-- 选择框固定在卡片右上角，不覆盖头像。
-- 对比工作区全屏显示。
-
-## 编辑同步
-
-Manager 不保存独立的 Persona 描述副本，而是直接读取和修改 SillyTavern 的 Persona 数据。保存后会调用设置保存接口；重新打开 Manager 会读取最新内容。
-
-## 注意
-
-不同 SillyTavern 版本的 Persona 内部数据结构可能变化。若原生 Persona 编辑器有额外的保存逻辑，建议保存后重新打开 Manager 验证。
+- Persona Manager 入口固定在 Persona 页面「全局设置」上方。
+- 启动时立即创建入口，不等待 Persona 数据读取。
+- 如果 Persona 设置区域稍后才渲染，会持续监听并自动挂载，不再只等待几十秒。
+- 多选 2 个或多个 Persona 进行对比。
+- 全文分段扫描匹配，不依赖原始前后顺序。
+- 相同 / 差异 / 独有内容分类。
+- 点击对比项可查看对应原 Persona 内容。
+- 可直接编辑 Persona 描述并保存回 SillyTavern。
+- 保存后重新读取并计算对比结果。
+- 选择框固定在 Persona 卡片右上角，不遮挡头像。
+- 扩展更新后会自动检测本地 manifest 版本变化并刷新页面，让新代码立即生效。
 
 ## 安装
 
-将本目录放入：
+### 方法一：通过 SillyTavern 链接安装（推荐）
 
-`data/default-user/extensions/third-party/persona-manager`
+1. 打开 SillyTavern。
+2. 打开「扩展」。
+3. 点击「安装扩展 / Install Extension」。
+4. 粘贴本仓库地址：
 
-然后在 SillyTavern 扩展管理中启用。
+`https://github.com/xingx121/persona-manager`
+
+5. 确认安装。
+6. 安装完成后刷新 SillyTavern 页面。
+
+SillyTavern 的扩展管理器支持从 Git URL 安装第三方扩展；更新扩展后通常需要重新加载页面才能让最新代码生效。
+
+### 方法二：手动安装
+
+1. 下载本仓库文件。
+2. 解压 `persona-manager` 文件夹。
+3. 将整个文件夹放入：
+
+`SillyTavern/public/scripts/extensions/third-party/`
+
+最终结构应为：
+
+`SillyTavern/public/scripts/extensions/third-party/persona-manager/manifest.json`
+
+并确保同目录下有：
+
+- `index.js`
+- `style.css`
+- `manifest.json`
+- `README.md`
+
+4. 刷新 SillyTavern 页面。
+
+## 更新
+
+### 使用扩展管理器安装
+
+在 SillyTavern 的扩展管理器中更新 Persona Manager。
+
+v1.5.1 会检查本地 `manifest.json` 的版本变化；检测到扩展被更新后，会自动刷新当前页面，使新版本代码立即加载。
+
+如果浏览器仍显示旧界面，可以手动执行一次 `Ctrl + F5`。
+
+### 手动安装
+
+用新版文件夹直接覆盖：
+
+`SillyTavern/public/scripts/extensions/third-party/persona-manager/`
+
+然后刷新页面。
+
+## 数据与同步
+
+Persona Manager 不建立自己的 Persona 描述副本，直接读取 SillyTavern 当前的 Persona 数据。
+
+编辑并保存后，会写回：
+
+`power_user.persona_descriptions`
+
+如果当前 SillyTavern 版本使用对象结构，则只更新其中的 `description` 字段，不覆盖其它 Persona 数据。
 
 ## 版本
 
-v1.5.0
+v1.5.1

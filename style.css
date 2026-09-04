@@ -1,5 +1,5 @@
 
-#persona-manager-entry{margin:10px 0;display:none}
+#persona-manager-entry{margin:10px 0;display:none;box-sizing:border-box}
 #persona-manager-entry.mounted{display:block}
 .persona-manager-entry-btn{width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--SmartThemeBorderColor,#555);border-radius:8px;background:var(--SmartThemeBlurTintColor,#222);color:var(--SmartThemeBodyColor,#eee);cursor:pointer;text-align:left}
 .persona-manager-entry-btn:hover{filter:brightness(1.12)}
