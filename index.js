@@ -1,5 +1,5 @@
 /**
- * Persona Manager v1.8.17
+ * Persona Manager v1.8.18
  *
  * Module map (all in this single file because ST third-party extensions
  * are loaded as one <script>):
@@ -23,13 +23,36 @@
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.17';
+const VERSION = '1.8.18';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
 const STORAGE_KEY = 'pmp18_settings';
 const REMOTE_MANIFEST = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json';
 const REMOTE_CHANGELOG = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/CHANGELOG.md';
+
+// Blacklist of body-descriptor / generic words that almost every persona uses.
+// These produce "shared" matches that say nothing about whether two personas
+// are actually the same. Tune by adding words you see falsely highlighted.
+// Declared at top so extractSharedSnippets() below can reference it without
+// tripping the const TDZ (which previously caused a ReferenceError mid-render
+// and left the manager in a half-rendered "frozen" state).
+const COMMON_STOPWORDS = new Set([
+    // body / appearance (very common across all personas)
+    '身高', '体重', '三围', '年龄', '血型', '星座', '性别', '种族', '国籍',
+    '发色', '发型', '发长', '瞳色', '眼睛', '肤色', '身材', '体型', '外貌',
+    // personality / generic
+    '性格', '特点', '特征', '属性', '设定', '背景', '简介', '描述',
+    '身份', '职业', '能力', '技能', '爱好', '喜欢', '讨厌', '擅长',
+    '温柔', '可爱', '美丽', '漂亮', '帅气', '冷酷', '高冷', '傲娇', '腹黑',
+    '开朗', '内向', '外向', '活泼', '安静', '沉默', '冷漠', '热情',
+    // generic body / measurement units alone (no number, already filtered by regex,
+    // but keep here as defense in depth)
+    'kg', 'cm', 'mm', '岁', '年', '月', '日',
+    // common Chinese 2-char grammar-ish words
+    '名字', '备注', '标题', '版本', '作者', '用户', '人设',
+    '故事', '世界', '时间', '地点', '场景',
+]);
 
 const defaultSettings = {
     similarityThreshold: 0.55,
@@ -699,25 +722,8 @@ function extractSharedSnippets(aText, bText) {
         .slice(0, 40);
 }
 
-// Blacklist of body-descriptor / generic words that almost every persona uses.
-// These produce "shared" matches that say nothing about whether two personas
-// are actually the same. Tune by adding words you see falsely highlighted.
-const COMMON_STOPWORDS = new Set([
-    // body / appearance (very common across all personas)
-    '身高', '体重', '三围', '年龄', '血型', '星座', '性别', '种族', '国籍',
-    '发色', '发型', '发长', '瞳色', '眼睛', '肤色', '身材', '体型', '外貌',
-    // personality / generic
-    '性格', '特点', '特征', '属性', '设定', '背景', '简介', '描述',
-    '身份', '职业', '能力', '技能', '爱好', '喜欢', '讨厌', '擅长',
-    '温柔', '可爱', '美丽', '漂亮', '帅气', '冷酷', '高冷', '傲娇', '腹黑',
-    '开朗', '内向', '外向', '活泼', '安静', '沉默', '冷漠', '热情',
-    // generic body / measurement units alone (no number, already filtered by regex,
-    // but keep here as defense in depth)
-    'kg', 'cm', 'mm', '岁', '年', '月', '日',
-    // common Chinese 2-char grammar-ish words
-    '名字', '备注', '标题', '版本', '作者', '用户', '人设',
-    '故事', '世界', '时间', '地点', '场景',
-]);
+// See COMMON_STOPWORDS at top of file (must be declared before
+// extractSharedSnippets to avoid the const TDZ trap).
 
 function shouldUseFragmentMode(baseText, otherText, score) {
     if (score < 0.15) return true;
@@ -1135,6 +1141,43 @@ function scheduleRender() {
 function renderManager() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
+    try {
+        renderManagerInner();
+    } catch (e) {
+        // Render errors must NEVER leave the manager in a half-rendered state
+        // (frozen page, no UI, body scroll locked). Fall back to a minimal
+        // error screen so the user can close it.
+        console.error(`[${EXT}] render failed`, e);
+        try {
+            root.innerHTML = `
+                <div class="pmp18-backdrop" data-action="close"></div>
+                <section class="pmp18-window" role="dialog" aria-modal="true">
+                    <header class="pmp18-header">
+                        <div class="pmp18-brand">
+                            <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
+                            <div><h1>Persona Manager</h1><span>v${VERSION}</span></div>
+                        </div>
+                        <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
+                    </header>
+                    <main class="pmp18-content" style="padding:24px">
+                        <div class="pmp18-empty" style="min-height:200px;text-align:left;align-items:flex-start">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <strong>渲染失败</strong>
+                            <span style="font-size:12px;opacity:.6;white-space:pre-wrap">${escapeHtml((e && e.stack) || String(e))}</span>
+                            <button class="pmp18-primary-btn" data-action="close" style="margin-top:8px">关闭</button>
+                        </div>
+                    </main>
+                </section>`;
+        } catch (_) {
+            // Last resort: blank the root and restore body scroll
+            root.innerHTML = '';
+            document.body.classList.remove('pmp18-open');
+        }
+    }
+}
+
+function renderManagerInner() {
+    const root = document.getElementById(ROOT_ID);
     const personas = getPersonaData();
     const sameNameGroups = getSameNameGroups(personas);
     const duplicateGroups = getExactDuplicateGroups(personas);
