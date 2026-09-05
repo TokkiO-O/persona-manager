@@ -15,13 +15,27 @@ function refreshUi() {
 /* ---------- Updates (remote manifest + CHANGELOG.md) ---------- */
 
 export async function fetchText(url) {
-    // Append a per-call cache-buster because some browser/CDN layers ignore
-    // the no-store hint (raw.githubusercontent.com has ~5 min CDN TTL).
     const sep = url.includes('?') ? '&' : '?';
+    // jsDelivr ignores random query on some paths; still helps GitHub raw CDN
     const u = `${url}${sep}t=${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const r = await fetch(u, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.text();
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
+    try {
+        const r = await fetch(u, {
+            method: 'GET',
+            mode: 'cors',
+            cache: 'no-store',
+            credentials: 'omit',
+            signal: ctrl?.signal,
+            headers: {
+                'Accept': 'application/json,text/plain,*/*',
+            },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
 }
 
 /** Try multiple mirrors until one succeeds (GitHub raw often blocked). */
@@ -88,7 +102,7 @@ export async function callExtensionUpdate() {
     }
     throw new Error(
         `酒馆没找到本扩展目录，自动化更新失败。` +
-        `\n请到 https://github.com/xingx121/persona-manager 手动下载 zip，` +
+        `\n请到 https://github.com/TokkiO-O/persona-manager 手动下载 zip，` +
         `解压覆盖到 data/default-user/extensions/ 下的人设管理文件夹。` +
         `\n（最近错误：${lastError?.message || lastError || '未知'}）`
     );
@@ -137,7 +151,13 @@ export async function checkForUpdates() {
         console.log(`[${EXT}] update check ok via`, usedUrl, 'remote=', rv);
     } catch (e) {
         const msg = e?.message || String(e);
-        state.updateInfo = { checked: true, available: false, error: true, message: msg };
+        state.updateInfo = {
+            checked: true,
+            available: false,
+            error: true,
+            message: msg,
+            hint: '浏览器无法访问外网更新源（常见于网络/代理/广告拦截）。扩展可照常使用，请到 GitHub 手动下载覆盖安装。',
+        };
         console.error(`[${EXT}] update check failed`, e);
     }
     if (state.tab === 'settings' || state.active) refreshUi();

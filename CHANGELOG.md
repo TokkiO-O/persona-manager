@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.9.6
+
+- 远程仓库改为 `TokkiO-O/persona-manager`（manifest / CHANGELOG / 更新镜像）
+
+
+## v1.9.5
+
+- 更新检查增加 gitmirror / ghproxy 等镜像，调整请求超时与 CORS 模式
+- 全部镜像失败时说明「扩展仍可用，请手动下载」
+
+
 ## v1.9.4
 
 - 更新检查：GitHub raw 失败时自动回退 `cdn.jsdelivr.net` / `fastly.jsdelivr.net`

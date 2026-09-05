@@ -5,9 +5,9 @@
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "xingx121",
-  "version": "1.9.4",
-  "description": "更新检查多镜像回退（GitHub raw + jsDelivr）。",
+  "author": "TokkiO-O",
+  "version": "1.9.6",
+  "description": "Persona 管理；更新源指向 TokkiO-O/persona-manager。",
   "hooks": {
     "update": "onUpdate"
   }
