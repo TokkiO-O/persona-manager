@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.7",
-  "description": "删除人设调用 /api/avatars/delete 并强制二次确认。",
+  "version": "1.9.8",
+  "description": "强化删除：API+powerUserSettings 双写，失败抛出明确错误。",
   "hooks": {
     "update": "onUpdate"
   }

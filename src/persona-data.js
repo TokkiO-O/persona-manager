@@ -6,10 +6,26 @@ import { getStRequestHeaders } from './update.js';
 
 function hasPowerUser() {
     try {
-        return !!(power_user && typeof power_user === 'object');
+        return !!(getLivePowerUser());
     } catch {
         return false;
     }
+}
+
+/** Prefer live module binding; fall back to getContext().powerUserSettings */
+function getLivePowerUser() {
+    try {
+        if (power_user && typeof power_user === 'object' && power_user.personas) return power_user;
+    } catch { /* ignore */ }
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        if (ctx?.powerUserSettings) return ctx.powerUserSettings;
+        if (ctx?.powerUser) return ctx.powerUser;
+    } catch { /* ignore */ }
+    try {
+        if (power_user && typeof power_user === 'object') return power_user;
+    } catch { /* ignore */ }
+    return null;
 }
 
 /* ---------- Persona read / write (id-safe) ---------- */
@@ -69,13 +85,14 @@ export function invalidatePersonaCache(reason) {
 export function getPersonaData() {
     if (_personaCache) return _personaCache.items;
 
-    if (!hasPowerUser()) {
+    const pu = getLivePowerUser();
+    if (!pu) {
         console.warn(`[${EXT}] power_user unavailable — persona list empty`);
         return []; // do NOT cache empty when power_user missing
     }
 
-    const personas = power_user.personas || {};
-    const descriptions = power_user.persona_descriptions || {};
+    const personas = pu.personas || {};
+    const descriptions = pu.persona_descriptions || {};
     const items = Object.entries(personas).map(([id, rawName]) => {
         const name = String(rawName ?? id);
         const rawDesc = descriptions?.[id];
@@ -191,72 +208,97 @@ export function persistPersonaFull(targetId, name, description) {
     return persistPersonaDescription(id, description);
 }
 
-/**
- * Delete persona the same way ST does:
- * 1) POST /api/avatars/delete (removes avatar file — otherwise ST re-adds the persona)
- * 2) drop power_user.personas / persona_descriptions
- * 3) save + emit + refresh native list when possible
- */
 export async function deletePersonaById(targetId) {
-    const id = String(targetId || '');
-    if (!id || !hasPowerUser()) return false;
-    if (!power_user.personas || !(id in power_user.personas)) {
-        console.error(`[${EXT}] delete: id not found`, id);
-        return false;
-    }
-    const name = power_user.personas[id];
+    const id = String(targetId || '').trim();
+    if (!id) return false;
 
-    // 1) Delete avatar file on server (critical)
+    const pu = getLivePowerUser();
+    if (!pu) {
+        console.error(`[${EXT}] delete: power_user unavailable`);
+        throw new Error('无法访问 power_user，删除中止');
+    }
+
+    // Normalize id (sometimes UI stores encoded names)
+    let avatarKey = id;
     try {
-        const headers = await getStRequestHeaders();
+        const decoded = decodeURIComponent(id);
+        if (pu.personas && (decoded in pu.personas) && !(id in pu.personas)) avatarKey = decoded;
+    } catch { /* ignore */ }
+
+    const name = (pu.personas && pu.personas[avatarKey]) || avatarKey;
+
+    // 1) Server: delete avatar file (ST will re-create persona from file if this fails)
+    const headers = await getStRequestHeaders();
+    let apiOk = false;
+    let apiStatus = 0;
+    let apiText = '';
+    try {
         const res = await fetch('/api/avatars/delete', {
             method: 'POST',
             headers,
             credentials: 'same-origin',
-            body: JSON.stringify({ avatar: id }),
+            body: JSON.stringify({ avatar: avatarKey }),
         });
-        if (!res.ok) {
-            const text = await res.text().catch(() => '');
-            console.error(`[${EXT}] /api/avatars/delete failed`, res.status, text);
-            // Still try local cleanup if file already gone
-            if (res.status !== 404) {
-                throw new Error(text || `HTTP ${res.status}`);
-            }
-        }
+        apiStatus = res.status;
+        apiText = await res.text().catch(() => '');
+        apiOk = res.ok;
+        console.log(`[${EXT}] /api/avatars/delete`, apiStatus, apiText || '(empty)');
     } catch (e) {
-        console.error(`[${EXT}] avatar delete request error`, e);
-        throw e;
+        console.error(`[${EXT}] /api/avatars/delete network error`, e);
+        throw new Error(`删除头像请求失败：${e?.message || e}`);
     }
 
-    // 2) Local settings cleanup (same as ST deletePersona)
-    delete power_user.personas[id];
-    if (power_user.persona_descriptions && id in power_user.persona_descriptions) {
-        delete power_user.persona_descriptions[id];
+    // 404 = file already gone — still clean settings
+    if (!apiOk && apiStatus !== 404) {
+        throw new Error(`删除头像失败 HTTP ${apiStatus} ${apiText}`.trim());
     }
+
+    // 2) Settings cleanup (mirror ST deletePersona)
+    if (pu.personas) delete pu.personas[avatarKey];
+    if (pu.persona_descriptions) delete pu.persona_descriptions[avatarKey];
     try {
-        if (power_user.default_persona === id) power_user.default_persona = null;
+        if (pu.default_persona === avatarKey) pu.default_persona = null;
+    } catch { /* ignore */ }
+
+    // Also mutate module binding if different object
+    try {
+        if (power_user && power_user !== pu) {
+            if (power_user.personas) delete power_user.personas[avatarKey];
+            if (power_user.persona_descriptions) delete power_user.persona_descriptions[avatarKey];
+            if (power_user.default_persona === avatarKey) power_user.default_persona = null;
+        }
     } catch { /* ignore */ }
 
     state.selected.delete(id);
-    state.compareIds = state.compareIds.filter(x => x !== id);
-    if (state.baselineId === id) state.baselineId = state.compareIds[0] || null;
-    if (state.focusOtherId === id) state.focusOtherId = state.compareIds.find(x => x !== state.baselineId) || null;
+    state.selected.delete(avatarKey);
+    state.compareIds = state.compareIds.filter(x => x !== id && x !== avatarKey);
+    if (state.baselineId === id || state.baselineId === avatarKey) {
+        state.baselineId = state.compareIds[0] || null;
+    }
+    if (state.focusOtherId === id || state.focusOtherId === avatarKey) {
+        state.focusOtherId = state.compareIds.find(x => x !== state.baselineId) || null;
+    }
 
     savePowerUserSettings();
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+    } catch { /* ignore */ }
+
     invalidatePersonaCache('deletePersonaById');
 
-    // 3) Events + refresh native persona UI
+    // 3) Event
     try {
         const ctx = window.SillyTavern?.getContext?.();
         const es = ctx?.eventSource;
         const types = ctx?.eventTypes || ctx?.event_types;
-        const payload = { avatarId: id, name };
+        const payload = { avatarId: avatarKey, name };
         if (es?.emit && types?.PERSONA_DELETED) await es.emit(types.PERSONA_DELETED, payload);
         else if (es?.emit) await es.emit('PERSONA_DELETED', payload);
     } catch { /* ignore */ }
 
+    // 4) Refresh native persona list / remove DOM leftovers
     try {
-        // Prefer ST helpers if exposed on window / context
         if (typeof window.getUserAvatars === 'function') {
             await window.getUserAvatars(true);
         } else {
@@ -264,38 +306,49 @@ export async function deletePersonaById(targetId) {
             if (typeof ctx?.getUserAvatars === 'function') await ctx.getUserAvatars(true);
         }
     } catch (e) {
-        console.warn(`[${EXT}] native persona list refresh failed`, e);
+        console.warn(`[${EXT}] getUserAvatars refresh failed`, e);
     }
+    try {
+        document.querySelectorAll(`[data-avatar-id="${CSS.escape(avatarKey)}"]`).forEach(el => {
+            const card = el.closest('.avatar-container, .persona_block, [class*="persona"]');
+            if (card) card.remove();
+            else el.remove();
+        });
+    } catch { /* ignore */ }
 
-    console.log(`[${EXT}] deleted persona id=${id} name=${name}`);
+    console.log(`[${EXT}] deleted persona id=${avatarKey} name=${name} api=${apiStatus}`);
     return true;
 }
 
-/** Confirm delete with ST Popup if available, else window.confirm (Tauri-safe). */
 export async function confirmDeletePersona(label, id) {
     const title = `删除人设：${label}`;
-    const body = `确定删除「${label}」？\nID: ${id}\n\n将删除头像文件与关联设定，不可自动恢复。`;
+    const bodyHtml = `确定删除「${escapeHtmlSafe(label)}」？<br/>ID: <code>${escapeHtmlSafe(id)}</code><br/><br/>将删除头像文件与关联设定，不可自动恢复。`;
+    const bodyText = `确定删除「${label}」？\nID: ${id}\n\n将删除头像文件与关联设定，不可自动恢复。`;
     try {
         const Popup = window.Popup || window.SillyTavern?.getContext?.()?.Popup;
         if (Popup?.show?.confirm) {
-            const ok = await Popup.show.confirm(title, body.replace(/\n/g, '<br/>'));
+            const ok = await Popup.show.confirm(title, bodyHtml);
             return !!ok;
         }
     } catch { /* ignore */ }
     try {
-        // Some Tauri builds break window.confirm — try callGenericPopup
         const ctx = window.SillyTavern?.getContext?.();
         if (typeof ctx?.callGenericPopup === 'function') {
-            // POPUP_TYPE.CONFIRM is often 1 or available on ctx
             const type = ctx.POPUP_TYPE?.CONFIRM ?? 1;
-            const result = await ctx.callGenericPopup(body.replace(/\n/g, '<br/>'), type, title);
-            // truthy / POPUP_RESULT.AFFIRMATIVE
+            const result = await ctx.callGenericPopup(bodyHtml, type, title);
             if (result === 1 || result === true || result === ctx.POPUP_RESULT?.AFFIRMATIVE) return true;
             if (result === 0 || result === false || result === ctx.POPUP_RESULT?.CANCELLED) return false;
             return !!result;
         }
     } catch { /* ignore */ }
-    // Last resort
-    return window.confirm(`${title}\n\n${body}`);
+    return window.confirm(`${title}\n\n${bodyText}`);
+}
+
+function escapeHtmlSafe(v) {
+    return String(v ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
 }
 

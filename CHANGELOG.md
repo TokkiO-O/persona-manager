@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.8
+
+- 删除：`/api/avatars/delete` + `powerUserSettings` 双写清理；HTTP 失败会明确报错
+- 删除后尝试刷新原生人设列表并移除残留 DOM
+
+
 ## v1.9.7
 
 - 删除人设：调用 `/api/avatars/delete` 删除头像文件，避免原界面再次出现
