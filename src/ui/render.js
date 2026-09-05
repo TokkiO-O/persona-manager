@@ -2,7 +2,7 @@ import { EXT, VERSION, ROOT_ID } from '../constants.js';
 import { state, saveSettingsLocal } from '../state.js';
 import { escapeHtml } from '../util.js';
 import {
-    getPersonaData, deletePersonaById
+    getPersonaData, deletePersonaById, confirmDeletePersona
 } from '../persona-data.js';
 import {
     getSameNameGroups, getExactDuplicateGroups, getSimilarPairs
@@ -394,13 +394,22 @@ export function ensureRoot() {
             const id = String(target.dataset.id || '');
             const p = getPersonaData().find(x => x.id === id);
             const label = p ? `${p.name}${p.title ? `（${p.title}）` : ''}` : id;
-            if (!window.confirm(`确定删除人设「${label}」？\nID: ${id}\n\n此操作会从酒馆数据中移除该 Persona（不可自动恢复）。`)) return;
-            if (deletePersonaById(id)) {
-                if (typeof toastr !== 'undefined') toastr.success(`已删除：${label}`);
-                renderManager();
-            } else if (typeof toastr !== 'undefined') {
-                toastr.error('删除失败');
-            }
+            (async () => {
+                const ok = await confirmDeletePersona(label, id);
+                if (!ok) return;
+                try {
+                    const done = await deletePersonaById(id);
+                    if (done) {
+                        if (typeof toastr !== 'undefined') toastr.success(`已删除：${label}`);
+                        renderManager();
+                    } else if (typeof toastr !== 'undefined') {
+                        toastr.error('删除失败');
+                    }
+                } catch (e) {
+                    console.error(e);
+                    if (typeof toastr !== 'undefined') toastr.error(`删除失败：${e?.message || e}`);
+                }
+            })();
             return;
         }
         if (action === 'check-update') {

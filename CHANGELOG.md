@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.7
+
+- 删除人设：调用 `/api/avatars/delete` 删除头像文件，避免原界面再次出现
+- 删除二次确认：优先用酒馆 Popup，兼容 TauriTavern
+
+
 ## v1.9.6
 
 - 远程仓库改为 `TokkiO-O/persona-manager`（manifest / CHANGELOG / 更新镜像）

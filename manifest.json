@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.6",
-  "description": "Persona 管理；更新源指向 TokkiO-O/persona-manager。",
+  "version": "1.9.7",
+  "description": "删除人设调用 /api/avatars/delete 并强制二次确认。",
   "hooks": {
     "update": "onUpdate"
   }

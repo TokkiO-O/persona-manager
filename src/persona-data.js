@@ -2,6 +2,7 @@ import { power_user } from '../power-user-bridge.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';
+import { getStRequestHeaders } from './update.js';
 
 function hasPowerUser() {
     try {
@@ -190,7 +191,13 @@ export function persistPersonaFull(targetId, name, description) {
     return persistPersonaDescription(id, description);
 }
 
-export function deletePersonaById(targetId) {
+/**
+ * Delete persona the same way ST does:
+ * 1) POST /api/avatars/delete (removes avatar file — otherwise ST re-adds the persona)
+ * 2) drop power_user.personas / persona_descriptions
+ * 3) save + emit + refresh native list when possible
+ */
+export async function deletePersonaById(targetId) {
     const id = String(targetId || '');
     if (!id || !hasPowerUser()) return false;
     if (!power_user.personas || !(id in power_user.personas)) {
@@ -198,11 +205,34 @@ export function deletePersonaById(targetId) {
         return false;
     }
     const name = power_user.personas[id];
+
+    // 1) Delete avatar file on server (critical)
+    try {
+        const headers = await getStRequestHeaders();
+        const res = await fetch('/api/avatars/delete', {
+            method: 'POST',
+            headers,
+            credentials: 'same-origin',
+            body: JSON.stringify({ avatar: id }),
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            console.error(`[${EXT}] /api/avatars/delete failed`, res.status, text);
+            // Still try local cleanup if file already gone
+            if (res.status !== 404) {
+                throw new Error(text || `HTTP ${res.status}`);
+            }
+        }
+    } catch (e) {
+        console.error(`[${EXT}] avatar delete request error`, e);
+        throw e;
+    }
+
+    // 2) Local settings cleanup (same as ST deletePersona)
     delete power_user.personas[id];
     if (power_user.persona_descriptions && id in power_user.persona_descriptions) {
         delete power_user.persona_descriptions[id];
     }
-    // If deleted was default / active, clear lightly (ST may also handle via event)
     try {
         if (power_user.default_persona === id) power_user.default_persona = null;
     } catch { /* ignore */ }
@@ -214,14 +244,58 @@ export function deletePersonaById(targetId) {
 
     savePowerUserSettings();
     invalidatePersonaCache('deletePersonaById');
+
+    // 3) Events + refresh native persona UI
     try {
         const ctx = window.SillyTavern?.getContext?.();
         const es = ctx?.eventSource;
         const types = ctx?.eventTypes || ctx?.event_types;
-        if (es?.emit && types?.PERSONA_DELETED) es.emit(types.PERSONA_DELETED, id);
-        else if (es?.emit) es.emit('PERSONA_DELETED', id);
+        const payload = { avatarId: id, name };
+        if (es?.emit && types?.PERSONA_DELETED) await es.emit(types.PERSONA_DELETED, payload);
+        else if (es?.emit) await es.emit('PERSONA_DELETED', payload);
     } catch { /* ignore */ }
+
+    try {
+        // Prefer ST helpers if exposed on window / context
+        if (typeof window.getUserAvatars === 'function') {
+            await window.getUserAvatars(true);
+        } else {
+            const ctx = window.SillyTavern?.getContext?.();
+            if (typeof ctx?.getUserAvatars === 'function') await ctx.getUserAvatars(true);
+        }
+    } catch (e) {
+        console.warn(`[${EXT}] native persona list refresh failed`, e);
+    }
+
     console.log(`[${EXT}] deleted persona id=${id} name=${name}`);
     return true;
+}
+
+/** Confirm delete with ST Popup if available, else window.confirm (Tauri-safe). */
+export async function confirmDeletePersona(label, id) {
+    const title = `删除人设：${label}`;
+    const body = `确定删除「${label}」？\nID: ${id}\n\n将删除头像文件与关联设定，不可自动恢复。`;
+    try {
+        const Popup = window.Popup || window.SillyTavern?.getContext?.()?.Popup;
+        if (Popup?.show?.confirm) {
+            const ok = await Popup.show.confirm(title, body.replace(/\n/g, '<br/>'));
+            return !!ok;
+        }
+    } catch { /* ignore */ }
+    try {
+        // Some Tauri builds break window.confirm — try callGenericPopup
+        const ctx = window.SillyTavern?.getContext?.();
+        if (typeof ctx?.callGenericPopup === 'function') {
+            // POPUP_TYPE.CONFIRM is often 1 or available on ctx
+            const type = ctx.POPUP_TYPE?.CONFIRM ?? 1;
+            const result = await ctx.callGenericPopup(body.replace(/\n/g, '<br/>'), type, title);
+            // truthy / POPUP_RESULT.AFFIRMATIVE
+            if (result === 1 || result === true || result === ctx.POPUP_RESULT?.AFFIRMATIVE) return true;
+            if (result === 0 || result === false || result === ctx.POPUP_RESULT?.CANCELLED) return false;
+            return !!result;
+        }
+    } catch { /* ignore */ }
+    // Last resort
+    return window.confirm(`${title}\n\n${body}`);
 }
 
