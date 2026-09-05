@@ -1,15 +1,15 @@
 /**
- * Persona Manager v1.8.9
- * - Fix list-edit writing into the wrong persona
- * - Focus compare: baseline + one other (switchable)
- * - Remote CHANGELOG.md for update notes
- * - Clear update feedback + force reload
+ * Persona Manager v1.8.12
+ * - Mobile CSS: viewport/100dvh + tap target sizes
+ * - Entry z-index/pointer-events fix (fullscreen mobile)
+ * - Compare workspace stacks vertically on narrow screens
+ * - Update: fallback to several install paths; clear manual instructions if all fail
  */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.10';
+const VERSION = '1.8.12';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -1124,16 +1124,39 @@ async function getStRequestHeaders() {
 }
 
 async function callExtensionUpdate() {
-    // Prefer ST's own updater if exposed
+    const candidates = [];
     if (typeof window.updateExtension === 'function') {
-        return window.updateExtension('persona-manager');
+        candidates.push(() => window.updateExtension('persona-manager'));
     }
+    candidates.push(() => updateViaApi({ extensionName: 'persona-manager', global: false }));
+    candidates.push(() => updateViaApi({ extensionName: 'persona-manager', global: true }));
+    candidates.push(() => updateViaApi({ extensionName: 'third-party/Persona Manager', global: false }));
+    candidates.push(() => updateViaApi({ extensionName: 'third-party/Persona-Manager', global: false }));
+    candidates.push(() => updateViaApi({ extensionName: 'third-party/persona-manager', global: false }));
+
+    let lastError = null;
+    for (const run of candidates) {
+        try {
+            return await run();
+        } catch (e) {
+            lastError = e;
+        }
+    }
+    throw new Error(
+        `酒馆没找到本扩展目录，自动化更新失败。` +
+        `\n请到 https://github.com/xingx121/persona-manager 手动下载 zip，` +
+        `解压覆盖到 data/default-user/extensions/ 下的人设管理文件夹。` +
+        `\n（最近错误：${lastError?.message || lastError || '未知'}）`
+    );
+}
+
+async function updateViaApi(payload) {
     const headers = await getStRequestHeaders();
     const res = await fetch('/api/extensions/update', {
         method: 'POST',
         headers,
         credentials: 'same-origin',
-        body: JSON.stringify({ extensionName: 'persona-manager', global: false }),
+        body: JSON.stringify(payload),
     });
     const text = await res.text();
     if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
