@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.11",
-  "description": "修复完全重复/高度相似 memo 互相覆盖导致检测为空。",
+  "version": "1.9.13",
+  "description": "更新日志多源对齐最高版本；打开弹窗强制重拉并显示来源 URL。",
   "hooks": {
     "update": "onUpdate"
   }

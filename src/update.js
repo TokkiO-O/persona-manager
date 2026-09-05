@@ -136,32 +136,45 @@ export async function checkForUpdates() {
     state.updateInfo = { checking: true };
     if (state.tab === 'settings') refreshUi();
     try {
-        // Query several mirrors; prefer the *newest* version (stale CDN may return old JSON).
-        const results = [];
+        const manifestResults = [];
         for (const url of REMOTE_MANIFEST_URLS) {
             try {
                 const text = await fetchText(url);
                 const remote = JSON.parse(text);
                 const rv = String(remote.version || '');
-                if (rv) results.push({ remote, rv, url, text });
+                if (rv) manifestResults.push({ remote, rv, url });
             } catch (e) {
-                console.warn(`[${EXT}] mirror fail`, url, e?.message || e);
+                console.warn(`[${EXT}] manifest mirror fail`, url, e?.message || e);
             }
         }
-        if (!results.length) throw new Error('全部更新源均失败');
-
-        results.sort((a, b) => compareSemver(b.rv, a.rv));
-        const best = results[0];
+        if (!manifestResults.length) throw new Error('全部更新源均失败');
+        manifestResults.sort((a, b) => compareSemver(b.rv, a.rv));
+        const best = manifestResults[0];
         const rv = best.rv;
         const remote = best.remote;
         const available = Boolean(rv && isRemoteNewer(rv, VERSION));
 
+        // Changelog: try all mirrors, prefer text whose first/matching section contains best version
         let changelog = '';
-        try {
-            // Prefer changelog from same host family as best manifest when possible
-            const ch = await fetchTextFromMirrors(REMOTE_CHANGELOG_URLS);
-            changelog = ch.text;
-        } catch {
+        let changelogSource = '';
+        const logCandidates = [];
+        for (const url of REMOTE_CHANGELOG_URLS) {
+            try {
+                const text = await fetchText(url);
+                if (text) logCandidates.push({ text, url });
+            } catch (e) {
+                console.warn(`[${EXT}] changelog mirror fail`, url, e?.message || e);
+            }
+        }
+        if (logCandidates.length) {
+            const scored = logCandidates.map(c => {
+                const hasVer = c.text.includes(rv) || c.text.includes(`v${rv}`) || c.text.includes(`V${rv}`);
+                return { ...c, hasVer };
+            });
+            scored.sort((a, b) => Number(b.hasVer) - Number(a.hasVer));
+            changelog = scored[0].text;
+            changelogSource = scored[0].url;
+        } else {
             changelog = remote.description || '（无法获取 CHANGELOG.md）';
         }
 
@@ -171,10 +184,12 @@ export async function checkForUpdates() {
             remoteVersion: rv,
             changelog,
             source: best.url,
-            sourcesTried: results.map(r => `${r.rv}@${r.url}`),
+            changelogSource,
+            sourcesTried: manifestResults.map(r => r.rv),
             error: false,
+            fetchedAt: Date.now(),
         };
-        console.log(`[${EXT}] update check best=`, rv, 'via', best.url, 'all=', results.map(r => r.rv));
+        console.log(`[${EXT}] update check best=`, rv, 'manifest@', best.url, 'changelog@', changelogSource);
     } catch (e) {
         const msg = e?.message || String(e);
         state.updateInfo = {
@@ -182,7 +197,7 @@ export async function checkForUpdates() {
             available: false,
             error: true,
             message: msg,
-            hint: '浏览器无法访问外网更新源（常见于网络/代理/广告拦截）。扩展可照常使用，请到 GitHub 手动下载覆盖安装。',
+            hint: '浏览器无法访问外网更新源。扩展可照常使用，请到 GitHub 手动下载覆盖安装。',
         };
         console.error(`[${EXT}] update check failed`, e);
     }
@@ -190,44 +205,65 @@ export async function checkForUpdates() {
     return state.updateInfo;
 }
 
-/** Only the first ## section of CHANGELOG.md (latest version). */
 export function extractLatestChangelogSection(md) {
-    const text = String(md || '').replace(/^\uFEFF/, '').trim();
+    return extractChangelogForVersion(md, null);
+}
+
+/**
+ * Prefer the ## section that matches remoteVersion (e.g. 1.9.13 / v1.9.13).
+ * Falls back to the first ## section.
+ */
+export function extractChangelogForVersion(md, version) {
+    const text = String(md || '').replace(/^﻿/, '').trim();
     if (!text) return '（无日志）';
     const headingRe = /^##\s+.+$/gm;
     const matches = [...text.matchAll(headingRe)];
     if (!matches.length) {
-        // No ## headings: return whole file but cap length
         return text.length > 4000 ? `${text.slice(0, 4000)}\n…` : text;
     }
-    const start = matches[0].index;
-    const end = matches[1] ? matches[1].index : text.length;
+    let idx = 0;
+    if (version) {
+        const ver = String(version).replace(/^[vV]/, '').trim();
+        const found = matches.findIndex(m => m[0].includes(ver));
+        if (found >= 0) idx = found;
+    }
+    const start = matches[idx].index;
+    const end = matches[idx + 1] ? matches[idx + 1].index : text.length;
     return text.slice(start, end).trim();
 }
 
-export function showUpdateModal() {
+export async function showUpdateModal() {
+    // Always re-fetch so modal is not stuck on a stale in-memory changelog
+    try {
+        await checkForUpdates();
+    } catch (e) {
+        console.warn(`[${EXT}] re-fetch before modal failed`, e);
+    }
     const info = state.updateInfo || {};
-    const log = extractLatestChangelogSection(info.changelog || '');
+    const log = extractChangelogForVersion(info.changelog || '', info.remoteVersion);
     const available = Boolean(info.available);
+    const sourceLine = [info.source, info.changelogSource].filter(Boolean).join(' · ');
     const overlay = document.createElement('div');
     overlay.className = 'pmp18-editor-overlay';
     overlay.innerHTML = `
-        <div class="pmp18-editor" style="max-width:560px">
-            <div class="pmp18-editor-head">
+        <div class="pmp18-editor-panel pmp18-update-modal">
+            <header class="pmp18-editor-header">
                 <strong>${available ? '发现新版本' : '更新日志'}</strong>
-                <button type="button" class="pmp18-close pmp18-editor-close"><i class="fa-solid fa-xmark"></i></button>
+                <button type="button" class="pmp18-editor-cancel" aria-label="关闭">×</button>
+            </header>
+            <div class="pmp18-editor-body">
+                <p>当前 <b>v${VERSION}</b>${info.remoteVersion ? ` · 远程 <b>v${escapeHtml(String(info.remoteVersion))}</b>` : ''}
+                ${available ? '' : ' <span class="pmp18-muted">（已是最新或远程不高于本地）</span>'}</p>
+                ${sourceLine ? `<p class="pmp18-muted" style="font-size:11px;word-break:break-all">来源：${escapeHtml(sourceLine)}</p>` : ''}
+                <pre class="pmp18-changelog">${escapeHtml(log)}</pre>
             </div>
-            <p>当前 <b>v${VERSION}</b>${info.remoteVersion ? ` · 远程 <b>v${escapeHtml(String(info.remoteVersion))}</b>` : ''}
-            ${available ? '' : ' · <span style="color:#3c9764">已是最新</span>'}</p>
-            <pre class="pmp18-changelog">${escapeHtml(log)}</pre>
-            <div class="pmp18-editor-actions">
+            <footer class="pmp18-editor-footer">
                 <button type="button" class="pmp18-small-btn pmp18-editor-cancel">关闭</button>
                 ${available ? '<button type="button" class="pmp18-primary-btn pmp18-do-update">立即更新</button>' : ''}
-            </div>
+            </footer>
         </div>`;
     const close = () => overlay.remove();
-    overlay.querySelector('.pmp18-editor-close').onclick = close;
-    overlay.querySelector('.pmp18-editor-cancel').onclick = close;
+    overlay.querySelectorAll('.pmp18-editor-cancel').forEach(btn => { btn.onclick = close; });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
     const doBtn = overlay.querySelector('.pmp18-do-update');
     if (doBtn) {
@@ -249,4 +285,3 @@ export function showUpdateModal() {
     }
     document.body.appendChild(overlay);
 }
-

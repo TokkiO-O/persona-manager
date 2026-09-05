@@ -83,10 +83,17 @@ export function invalidatePersonaCache(reason) {
  * Pull /api/avatars/get and merge missing ids into the live store so the
  * manager sees newly created personas without a full page reload.
  */
+/**
+ * Refresh persona visibility from disk WITHOUT writing placeholder names
+ * into power_user (writing "[未命名]" / letting ST call addMissingPersonas
+ * produces leftover "[Unnamed Persona]" entries).
+ *
+ * ST already registers new personas in power_user when you create them in UI.
+ * We only invalidate caches and optionally note disk file ids for debug.
+ */
 export async function syncPersonasFromAvatarFiles() {
     const pu = getLivePowerUser();
     if (!pu) return false;
-    if (!pu.personas) pu.personas = {};
     try {
         const headers = await getStRequestHeaders();
         const res = await fetch('/api/avatars/get', {
@@ -97,34 +104,45 @@ export async function syncPersonasFromAvatarFiles() {
         });
         if (!res.ok) {
             console.warn(`[${EXT}] /api/avatars/get HTTP`, res.status);
+            invalidatePersonaCache('syncAvatars-fail');
             return false;
         }
         const data = await res.json();
         const list = Array.isArray(data) ? data : (data?.images || data?.avatars || []);
-        if (!Array.isArray(list)) return false;
-        let added = 0;
-        for (const item of list) {
-            const id = String(typeof item === 'string' ? item : (item?.filename || item?.name || item?.avatar || '')).trim();
-            if (!id) continue;
-            if (!(id in pu.personas)) {
-                pu.personas[id] = '[未命名]';
-                added += 1;
+        const diskIds = new Set();
+        if (Array.isArray(list)) {
+            for (const item of list) {
+                const id = String(typeof item === 'string' ? item : (item?.filename || item?.name || item?.avatar || '')).trim();
+                if (id) diskIds.add(id);
             }
         }
-        if (added) {
-            invalidatePersonaCache(`syncAvatars:+${added}`);
-            console.log(`[${EXT}] synced ${added} persona(s) from avatar files`);
-            return true;
+        // If power_user has entries whose avatar file is gone, drop them (stale)
+        let removed = 0;
+        if (pu.personas && diskIds.size) {
+            for (const id of Object.keys(pu.personas)) {
+                if (!diskIds.has(id)) {
+                    // Only auto-remove obvious placeholders left by old sync / ST
+                    const name = String(pu.personas[id] || '');
+                    if (name === '[未命名]' || name === '[Unnamed Persona]' || name === 'Unnamed Persona') {
+                        delete pu.personas[id];
+                        if (pu.persona_descriptions) delete pu.persona_descriptions[id];
+                        removed += 1;
+                    }
+                }
+            }
+            if (removed) {
+                savePowerUserSettings();
+                console.log(`[${EXT}] removed ${removed} stale Unnamed placeholder(s)`);
+            }
         }
-        // still invalidate so lengths re-read
-        invalidatePersonaCache('syncAvatars');
-        return false;
+        invalidatePersonaCache(`syncAvatars:disk=${diskIds.size},removed=${removed}`);
+        return removed > 0;
     } catch (e) {
         console.warn(`[${EXT}] syncPersonasFromAvatarFiles failed`, e);
+        invalidatePersonaCache('syncAvatars-error');
         return false;
     }
 }
-
 
 /**
  * Returns parsed persona list, with shape:
@@ -366,19 +384,10 @@ export async function deletePersonaById(targetId) {
     } catch { /* ignore */ }
 
     // 4) Refresh native persona list / remove DOM leftovers
-    // Defer native list refresh so it does not tear down our open manager UI
-    setTimeout(async () => {
-        try {
-            if (typeof window.getUserAvatars === 'function') {
-                await window.getUserAvatars(true);
-            } else {
-                const ctx = window.SillyTavern?.getContext?.();
-                if (typeof ctx?.getUserAvatars === 'function') await ctx.getUserAvatars(true);
-            }
-        } catch (e) {
-            console.warn(`[${EXT}] getUserAvatars refresh failed`, e);
-        }
-    }, 0);
+    // Do NOT call getUserAvatars() here: ST's addMissingPersonas will recreate
+    // "[Unnamed Persona]" if the filesystem/API briefly still lists the file.
+    // Native panel refreshes on next open; we already removed power_user entries.
+
     try {
         document.querySelectorAll(`[data-avatar-id="${CSS.escape(avatarKey)}"]`).forEach(el => {
             const card = el.closest('.avatar-container, .persona_block, [class*="persona"]');

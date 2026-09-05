@@ -1,13 +1,12 @@
 /** Shared constants for Persona Manager */
 
 export const EXT = 'Persona Manager';
-export const VERSION = '1.9.11';
+export const VERSION = '1.9.13';
 export const ROOT_ID = 'pmp18-root';
 export const BUTTON_ID = 'pmp18-entry';
 export const ENTRY_MARK = 'pmp18-entry-installed';
 export const STORAGE_KEY = 'pmp18_settings';
 export const REMOTE_MANIFEST_URLS = [
-    // Prefer GitHub raw (accurate). jsDelivr @main is often hours/days stale.
     'https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/manifest.json',
     'https://cdn.jsdelivr.net/gh/TokkiO-O/persona-manager@main/manifest.json',
     'https://fastly.jsdelivr.net/gh/TokkiO-O/persona-manager@main/manifest.json',
@@ -15,15 +14,13 @@ export const REMOTE_MANIFEST_URLS = [
     'https://ghproxy.net/https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/manifest.json',
     'https://mirror.ghproxy.com/https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/manifest.json',
 ];
-
 export const REMOTE_CHANGELOG_URLS = [
+    'https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/CHANGELOG.md',
     'https://cdn.jsdelivr.net/gh/TokkiO-O/persona-manager@main/CHANGELOG.md',
     'https://fastly.jsdelivr.net/gh/TokkiO-O/persona-manager@main/CHANGELOG.md',
-    'https://gcore.jsdelivr.net/gh/TokkiO-O/persona-manager@main/CHANGELOG.md',
     'https://raw.gitmirror.com/TokkiO-O/persona-manager/main/CHANGELOG.md',
     'https://ghproxy.net/https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/CHANGELOG.md',
     'https://mirror.ghproxy.com/https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/CHANGELOG.md',
-    'https://raw.githubusercontent.com/TokkiO-O/persona-manager/main/CHANGELOG.md',
 ];
 // Back-compat single URL (first mirror)
 export const REMOTE_MANIFEST = REMOTE_MANIFEST_URLS[0];
