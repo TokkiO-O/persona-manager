@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.16
+
+- 基准按钮加 avatar + 名字 + 副标题：5 个同名同头像无备注的人设也能区分
+- 共同片段提取规则收紧：长度下限 2→3；度量单位必须跟数字一起（不再单独高亮 `kg` / `cm`）
+- 新增 COMMON_STOPWORDS 黑名单：身高 / 三围 / 体重 / 性格 / 特点 / 性别 / 血型 / 发色 等通用描述词不参与"共同片段"
+- 更新检查加 cache-buster（`?t=...` 随机数），绕过 raw.githubusercontent.com 5-10 分钟 CDN 缓存，立即看到新版本
+
 ## v1.8.15
 
 - 选 persona checkbox / 清除选择 / 全选组 改为 in-place DOM 更新，不再触发 `renderManager()` 重渲染，彻底避免列表页回顶

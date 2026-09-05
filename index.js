@@ -1,5 +1,5 @@
 /**
- * Persona Manager v1.8.15
+ * Persona Manager v1.8.16
  * - Mobile CSS: viewport/100dvh + tap target sizes
  * - Entry z-index/pointer-events fix (fullscreen mobile)
  * - Compare workspace stacks vertically on narrow screens
@@ -8,11 +8,15 @@
  * - Mobile editor: fullscreen flex layout so textarea stays visible
  * - Preserve scroll position across re-renders (compare page no longer jumps to top)
  * - Select checkbox: in-place DOM update (no full re-render), so scroll never resets
+ * - Baseline buttons now show avatar + name + subline (so 5 同名同头像 are distinguishable)
+ * - Shared snippets: dropped length-2 matches, require number+unit for measurements,
+ *   blacklist common body/personal words (身高/三围/性格 etc.)
+ * - Update check: per-call cache-buster on raw.githubusercontent.com URLs
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.15';
+const VERSION = '1.8.16';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -574,36 +578,68 @@ function extractSharedSnippets(aText, bText) {
         const m = text.match(re) || [];
         for (const x of m) {
             const t = x.trim();
-            if (t.length >= 2) candidates.add(t);
+            if (t.length >= 3) candidates.add(t);
         }
     };
-    // measurements / dates / short alnum
-    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|m|岁|年|月|日|%|cm|CM|KG)?/gi);
-    pushMatches(a, /[A-Za-z\u4e00-\u9fff]{2,12}/g);
+
+    // 1) Measurements: number REQUIRED to come with a unit. A bare "kg" / "cm"
+    //    / "%" is a noisy overlap that almost every persona has; the unit alone
+    //    conveys no shared identity.
+    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|mm|cm³|m|岁|年|月|日|%|度|个|岁|V|W|cm3|kg\/m[²2]?)/gi);
+    // 2) Proper-noun-ish phrases: Han/alpha runs, length 3..14.
+    //    (length 2 dropped because too many common CJK words like 身高/三围/体重
+    //    /性格/特点/名字/年龄/性别/血型 would match and dominate the list.)
+    pushMatches(a, /[A-Za-z\u4e00-\u9fff]{3,14}/g);
+
+    // 3) Quoted / bracketed short labels, e.g. 『发色：黑』, "瞳色：蓝"
+    pushMatches(a, /[「『"']([^「『"'\n]{2,18})[」』"']/g);
+    // Strip the surrounding quotes — we keep the inner text
+    // (handled below in the dedup pass)
 
     const shared = [];
-    const bNorm = b;
+    const aLow = a.toLocaleLowerCase();
+    const bLow = b.toLocaleLowerCase();
     for (const c of candidates) {
-        if (c.length < 2 || c.length > 24) continue;
-        if (/^(的|了|和|与|或|在|是|有|我|你|他|她|它)$/.test(c)) continue;
-        if (bNorm.includes(c)) shared.push(c);
+        if (c.length < 3 || c.length > 24) continue;
+        if (COMMON_STOPWORDS.has(c.toLocaleLowerCase())) continue;
+        if (b.includes(c) || bLow.includes(c.toLocaleLowerCase())) shared.push(c);
     }
-    // unique, longer first
+
+    // unique, longer first, then drop if substring of an already-kept longer one
     const seen = new Set();
     return shared
         .sort((x, y) => y.length - x.length)
         .filter(s => {
             const k = normalizeText(s);
             if (seen.has(k)) return false;
-            // drop if contained in already kept longer snippet
             for (const keep of seen) {
-                if (keep.includes(k) && keep !== k) return false;
+                if (keep.includes(s) && keep !== s) return false;
             }
             seen.add(k);
             return true;
         })
         .slice(0, 40);
 }
+
+// Blacklist of body-descriptor / generic words that almost every persona uses.
+// These produce "shared" matches that say nothing about whether two personas
+// are actually the same. Tune by adding words you see falsely highlighted.
+const COMMON_STOPWORDS = new Set([
+    // body / appearance (very common across all personas)
+    '身高', '体重', '三围', '年龄', '血型', '星座', '性别', '种族', '国籍',
+    '发色', '发型', '发长', '瞳色', '眼睛', '肤色', '身材', '体型', '外貌',
+    // personality / generic
+    '性格', '特点', '特征', '属性', '设定', '背景', '简介', '描述',
+    '身份', '职业', '能力', '技能', '爱好', '喜欢', '讨厌', '擅长',
+    '温柔', '可爱', '美丽', '漂亮', '帅气', '冷酷', '高冷', '傲娇', '腹黑',
+    '开朗', '内向', '外向', '活泼', '安静', '沉默', '冷漠', '热情',
+    // generic body / measurement units alone (no number, already filtered by regex,
+    // but keep here as defense in depth)
+    'kg', 'cm', 'mm', '岁', '年', '月', '日',
+    // common Chinese 2-char grammar-ish words
+    '名字', '备注', '标题', '版本', '作者', '用户', '人设',
+    '故事', '世界', '时间', '地点', '场景',
+]);
 
 function shouldUseFragmentMode(baseText, otherText, score) {
     if (score < 0.15) return true;
@@ -800,7 +836,7 @@ function renderCompareWorkspace(personas) {
         const p = personas.find(x => x.id === id);
         if (!p) return '';
         const sub = formatPersonaSubline(p);
-        return `<button type="button" class="pmp18-base-btn ${id === state.baselineId ? 'is-active' : ''}" data-action="set-baseline" data-id="${escapeHtml(id)}" title="${escapeHtml(sub)}">${escapeHtml(p.name)}<small>${escapeHtml(sub)}</small></button>`;
+        return `<button type="button" class="pmp18-base-btn ${id === state.baselineId ? 'is-active' : ''}" data-action="set-baseline" data-id="${escapeHtml(id)}" title="${escapeHtml(sub)}">${renderAvatar(p)}<span class="pmp18-base-btn-meta"><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(sub)}</small></span></button>`;
     }).join('');
 
     const otherCards = others.map(id => {
@@ -1157,7 +1193,11 @@ function openFullEditor(rawId) {
 /* ---------- Updates (remote manifest + CHANGELOG.md) ---------- */
 
 async function fetchText(url) {
-    const r = await fetch(url, { cache: 'no-store' });
+    // Append a per-call cache-buster because some browser/CDN layers ignore
+    // the no-store hint (raw.githubusercontent.com has ~5 min CDN TTL).
+    const sep = url.includes('?') ? '&' : '?';
+    const u = `${url}${sep}t=${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const r = await fetch(u, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.text();
 }

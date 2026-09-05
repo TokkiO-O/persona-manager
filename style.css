@@ -323,12 +323,21 @@ body.pmp18-open { overflow: hidden !important; }
 .pmp18-base-btn {
     border: 1px solid rgba(127,127,127,.22);
     border-radius: 999px;
-    padding: 5px 12px;
+    padding: 4px 12px 4px 4px;
     background: rgba(127,127,127,.08);
     color: inherit;
     cursor: pointer;
     font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
 }
+.pmp18-base-btn .pmp18-avatar {
+    width: 26px; height: 26px; flex: 0 0 26px;
+    border: 1px solid rgba(127,127,127,.18);
+}
+.pmp18-base-btn-meta { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; min-width: 0; }
+.pmp18-base-btn-meta strong { font-size: 12px; font-weight: 600; }
 .pmp18-base-btn.is-active {
     background: rgba(255,138,98,.18);
     border-color: rgba(255,138,98,.5);
@@ -807,7 +816,7 @@ mark.pmp18-add {
 }
 .pmp18-danger-btn { color: #c44 !important; border-color: rgba(200,60,60,.35) !important; }
 .pmp18-danger-btn:hover { background: rgba(200,60,60,.1) !important; }
-.pmp18-base-btn small {
+.pmp18-base-btn-meta small {
     display: block;
     font-size: 10px;
     opacity: .55;
@@ -815,6 +824,7 @@ mark.pmp18-add {
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .pmp18-legend {
     display: flex;
@@ -987,12 +997,13 @@ mark.pmp18-share {
     .pmp18-baseline-label { font-size: 11px; }
     .pmp18-baseline-list { gap: 4px; }
     .pmp18-base-btn {
-        flex: 1 1 auto;
+        flex: 0 1 auto;
         min-width: 0;
-        padding: 4px 8px;
+        padding: 3px 10px 3px 3px;
         font-size: 11px;
     }
-    .pmp18-base-btn small { display: none; }
+    .pmp18-base-btn .pmp18-avatar { width: 22px; height: 22px; flex: 0 0 22px; }
+    .pmp18-base-btn-meta small { display: none; }
 
     .pmp18-others-scroll {
         flex-wrap: wrap;
