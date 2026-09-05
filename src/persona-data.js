@@ -2,6 +2,7 @@ import { power_user } from '../power-user-bridge.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';
+import { invalidateGroupMemo } from './similarity.js';
 import { getStRequestHeaders } from './update.js';
 
 function hasPowerUser() {
@@ -74,6 +75,7 @@ export let _personaVersion = 0;
 // event).
 export function invalidatePersonaCache(reason) {
     _personaCache = null;
+    try { invalidateGroupMemo(); } catch { /* ignore */ }
 }
 
 /**
