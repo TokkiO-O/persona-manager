@@ -1,4 +1,11 @@
-import { power_user } from '../../../../power-user.js';
+// power-user.js lives at /scripts/power-user.js (public/scripts/ in the
+// SillyTavern repo). Our extension sits at
+// /scripts/extensions/third-party/Persona Manager/, so from
+// src/persona-data.js we need to climb out 4 levels then down into
+// scripts/. Earlier builds used a wrong relative path and the import
+// errored, which aborted the whole module graph and prevented the entry
+// button from being injected.
+import { power_user } from '../../../../scripts/power-user.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';

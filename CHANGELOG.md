@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.2
+
+- **关键修复：入口按钮消失**
+  根因：`src/persona-data.js` 用了 `import { power_user } from '../../../../power-user.js'`，但 `power-user.js` 实际在 `public/scripts/` 下，URL 应该是 `/scripts/power-user.js`。相对路径错了 → 浏览器解析 `import` 失败 → **整个 ESM module graph 被拒绝执行** → `init()` 从未跑 → 入口按钮永远没注入
+  修复：改为 `'../../../../scripts/power-user.js'`，加注释说明路径由来
+  副作用：v1.9.0/v1.9.1 之所以能看到 v1.8.x 行为，是因为 power-user 的 import 错误把整个 module 都阻止执行了；任何想依赖 v1.9+ 新模块化行为的人都得装这个版本
+
 ## v1.9.0
 
 - 代码拆分为 `src/` 多模块（ESM），入口仍为 `index.js`

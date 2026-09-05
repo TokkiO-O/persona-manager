@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.9.1",
-  "description": "Persona 管理（模块化）：修复 src 内 power-user 路径导致入口丢失。",
+  "version": "1.9.2",
+  "description": "Persona \u7ba1\u7406\uff08\u6a21\u5757\u5316\uff09\uff1a\u4fee\u590d power-user import \u8def\u5f84\uff0c\u5165\u53e3\u6062\u590d\u3002",
   "hooks": {
     "update": "onUpdate"
   }
