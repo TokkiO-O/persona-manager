@@ -1,6 +1,6 @@
 import { EXT, VERSION, REMOTE_MANIFEST_URLS, REMOTE_CHANGELOG_URLS } from './constants.js';
 import { state } from './state.js';
-import { escapeHtml } from './util.js';
+import { escapeHtml, isRemoteNewer } from './util.js';
 
 
 let _uiRefresh = () => {};
@@ -132,7 +132,7 @@ export async function checkForUpdates() {
         const { text, url: usedUrl } = await fetchTextFromMirrors(REMOTE_MANIFEST_URLS);
         const remote = JSON.parse(text);
         const rv = String(remote.version || '');
-        const available = Boolean(rv && rv !== VERSION);
+        const available = Boolean(rv && isRemoteNewer(rv, VERSION));
         let changelog = '';
         try {
             const ch = await fetchTextFromMirrors(REMOTE_CHANGELOG_URLS);

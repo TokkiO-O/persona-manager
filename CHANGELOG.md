@@ -2,6 +2,10 @@
 
 ## v1.9.8
 
+- **修复误报更新**：版本比较改为语义化（仅当远程 > 本地才提示有更新；本地 1.9.7 不会再把远程 1.9.6 当成新版本）
+- 删除：`/api/avatars/delete` + `powerUserSettings` 双写清理；HTTP 失败会明确报错
+- 删除后尝试刷新原生人设列表并移除残留 DOM
+
 - 删除：`/api/avatars/delete` + `powerUserSettings` 双写清理；HTTP 失败会明确报错
 - 删除后尝试刷新原生人设列表并移除残留 DOM
 
