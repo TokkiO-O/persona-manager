@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.9",
-  "description": "多选删除；删除后保持管理器打开。",
+  "version": "1.9.10",
+  "description": "更新源取最高版本；打开时同步新人设。",
   "hooks": {
     "update": "onUpdate"
   }

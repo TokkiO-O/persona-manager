@@ -77,18 +77,86 @@ export function invalidatePersonaCache(reason) {
 }
 
 /**
+ * ST keeps persona avatars on disk; power_user.personas can lag behind.
+ * Pull /api/avatars/get and merge missing ids into the live store so the
+ * manager sees newly created personas without a full page reload.
+ */
+export async function syncPersonasFromAvatarFiles() {
+    const pu = getLivePowerUser();
+    if (!pu) return false;
+    if (!pu.personas) pu.personas = {};
+    try {
+        const headers = await getStRequestHeaders();
+        const res = await fetch('/api/avatars/get', {
+            method: 'POST',
+            headers,
+            credentials: 'same-origin',
+            body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+            console.warn(`[${EXT}] /api/avatars/get HTTP`, res.status);
+            return false;
+        }
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.images || data?.avatars || []);
+        if (!Array.isArray(list)) return false;
+        let added = 0;
+        for (const item of list) {
+            const id = String(typeof item === 'string' ? item : (item?.filename || item?.name || item?.avatar || '')).trim();
+            if (!id) continue;
+            if (!(id in pu.personas)) {
+                pu.personas[id] = '[未命名]';
+                added += 1;
+            }
+        }
+        if (added) {
+            invalidatePersonaCache(`syncAvatars:+${added}`);
+            console.log(`[${EXT}] synced ${added} persona(s) from avatar files`);
+            return true;
+        }
+        // still invalidate so lengths re-read
+        invalidatePersonaCache('syncAvatars');
+        return false;
+    } catch (e) {
+        console.warn(`[${EXT}] syncPersonasFromAvatarFiles failed`, e);
+        return false;
+    }
+}
+
+
+/**
  * Returns parsed persona list, with shape:
  *   { id, name, title, description, nameKey, descriptionKey }.
  * Memoized: re-renders don't re-parse descriptions. Invalidated by
  * PERSONA_UPDATED / PERSONA_DELETED events and by our own writes.
  */
-export function getPersonaData() {
-    if (_personaCache) return _personaCache.items;
+function personaStoreSig(pu) {
+    if (!pu?.personas) return '';
+    // ids + name lengths + description lengths — cheap change detector
+    const ids = Object.keys(pu.personas).sort();
+    let s = `${ids.length}|`;
+    const descs = pu.persona_descriptions || {};
+    for (const id of ids) {
+        const name = pu.personas[id];
+        const d = descs[id];
+        const dlen = d == null ? 0 : (typeof d === 'string' ? d.length : (d.description || '').length);
+        const tlen = d && typeof d === 'object' ? String(d.title || '').length : 0;
+        s += `${id}:${String(name || '').length}:${dlen}:${tlen};`;
+    }
+    return s;
+}
 
+export function getPersonaData() {
     const pu = getLivePowerUser();
     if (!pu) {
         console.warn(`[${EXT}] power_user unavailable — persona list empty`);
-        return []; // do NOT cache empty when power_user missing
+        _personaCache = null;
+        return [];
+    }
+
+    const sig = personaStoreSig(pu);
+    if (_personaCache && _personaCache.sig === sig) {
+        return _personaCache.items;
     }
 
     const personas = pu.personas || {};
@@ -107,9 +175,7 @@ export function getPersonaData() {
             descriptionKey: normalizeText(description),
         };
     });
-    // Only cache non-empty; empty is valid only when user truly has zero personas
-    // but still cache it so we don't re-parse every frame — power_user is present.
-    _personaCache = { items, version: ++_personaVersion };
+    _personaCache = { items, sig, version: ++_personaVersion };
     return items;
 }
 

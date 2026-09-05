@@ -1,6 +1,6 @@
 import { EXT, VERSION, REMOTE_MANIFEST_URLS, REMOTE_CHANGELOG_URLS } from './constants.js';
 import { state } from './state.js';
-import { escapeHtml, isRemoteNewer } from './util.js';
+import { escapeHtml, isRemoteNewer, compareSemver } from './util.js';
 
 
 let _uiRefresh = () => {};
@@ -44,7 +44,14 @@ export async function fetchTextFromMirrors(urls) {
     const errors = [];
     for (const url of list) {
         try {
-            const text = await fetchText(url);
+            let text = await fetchText(url);
+            // GitHub Contents API returns JSON with base64 content
+            if (url.includes('api.github.com') && url.includes('/contents/')) {
+                const j = JSON.parse(text);
+                if (j.content) {
+                    text = atob(String(j.content).replace(/\s/g, ''));
+                }
+            }
             if (text != null && String(text).length) return { text: String(text), url };
         } catch (e) {
             errors.push(`${url} → ${e?.message || e}`);
@@ -129,26 +136,45 @@ export async function checkForUpdates() {
     state.updateInfo = { checking: true };
     if (state.tab === 'settings') refreshUi();
     try {
-        const { text, url: usedUrl } = await fetchTextFromMirrors(REMOTE_MANIFEST_URLS);
-        const remote = JSON.parse(text);
-        const rv = String(remote.version || '');
+        // Query several mirrors; prefer the *newest* version (stale CDN may return old JSON).
+        const results = [];
+        for (const url of REMOTE_MANIFEST_URLS) {
+            try {
+                const text = await fetchText(url);
+                const remote = JSON.parse(text);
+                const rv = String(remote.version || '');
+                if (rv) results.push({ remote, rv, url, text });
+            } catch (e) {
+                console.warn(`[${EXT}] mirror fail`, url, e?.message || e);
+            }
+        }
+        if (!results.length) throw new Error('全部更新源均失败');
+
+        results.sort((a, b) => compareSemver(b.rv, a.rv));
+        const best = results[0];
+        const rv = best.rv;
+        const remote = best.remote;
         const available = Boolean(rv && isRemoteNewer(rv, VERSION));
+
         let changelog = '';
         try {
+            // Prefer changelog from same host family as best manifest when possible
             const ch = await fetchTextFromMirrors(REMOTE_CHANGELOG_URLS);
             changelog = ch.text;
         } catch {
             changelog = remote.description || '（无法获取 CHANGELOG.md）';
         }
+
         state.updateInfo = {
             checked: true,
             available,
             remoteVersion: rv,
             changelog,
-            source: usedUrl,
+            source: best.url,
+            sourcesTried: results.map(r => `${r.rv}@${r.url}`),
             error: false,
         };
-        console.log(`[${EXT}] update check ok via`, usedUrl, 'remote=', rv);
+        console.log(`[${EXT}] update check best=`, rv, 'via', best.url, 'all=', results.map(r => r.rv));
     } catch (e) {
         const msg = e?.message || String(e);
         state.updateInfo = {

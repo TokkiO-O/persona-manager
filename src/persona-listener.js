@@ -17,17 +17,27 @@ export function installPersonaListener() {
         const es = ctx?.eventSource;
         if (!es?.on) return;
         const types = ctx?.eventTypes || ctx?.event_types || {};
-        const updated = types.PERSONA_UPDATED || 'PERSONA_UPDATED';
-        const deleted = types.PERSONA_DELETED || 'PERSONA_DELETED';
-        es.on(updated, () => {
-            invalidatePersonaCache('event:PERSONA_UPDATED');
+        const names = [
+            types.PERSONA_UPDATED || 'PERSONA_UPDATED',
+            types.PERSONA_DELETED || 'PERSONA_DELETED',
+            types.PERSONA_CREATED || 'PERSONA_CREATED',
+            types.PERSONA_CHANGED || 'PERSONA_CHANGED',
+            'PERSONA_UPDATED',
+            'PERSONA_DELETED',
+            'PERSONA_CREATED',
+            'PERSONA_CHANGED',
+        ];
+        const seen = new Set();
+        const onEvt = (tag) => () => {
+            invalidatePersonaCache(`event:${tag}`);
             if (state.active) _refresh();
-        });
-        es.on(deleted, () => {
-            invalidatePersonaCache('event:PERSONA_DELETED');
-            if (state.active) _refresh();
-        });
-        console.log(`[${EXT}] persona event listener attached`);
+        };
+        for (const n of names) {
+            if (!n || seen.has(n)) continue;
+            seen.add(n);
+            es.on(n, onEvt(n));
+        }
+        console.log(`[${EXT}] persona event listener attached`, [...seen]);
     } catch (e) {
         console.warn(`[${EXT}] could not attach persona event listener`, e);
     }

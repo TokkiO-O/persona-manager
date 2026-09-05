@@ -2,7 +2,7 @@ import { EXT, VERSION, ROOT_ID } from '../constants.js';
 import { state, saveSettingsLocal } from '../state.js';
 import { escapeHtml } from '../util.js';
 import {
-    getPersonaData, deletePersonaById, confirmDeletePersona
+    getPersonaData, deletePersonaById, confirmDeletePersona, invalidatePersonaCache, syncPersonasFromAvatarFiles
 } from '../persona-data.js';
 import {
     getSameNameGroups, getExactDuplicateGroups, getSimilarPairs
@@ -54,7 +54,7 @@ export function renderSettingsPanel() {
         <div class="pmp18-update-box">
             <div>
                 <div><b>已是最新版本</b> v${VERSION}</div>
-                <div class="pmp18-muted">可查看更新日志</div>
+                <div class="pmp18-muted">远程 v${escapeHtml(String(upd.remoteVersion || '—'))} · 可查看日志</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button type="button" class="pmp18-small-btn" data-action="show-update-modal">更新日志</button>
@@ -165,6 +165,7 @@ export function renderManager() {
                             <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
                             <div><h1>Persona Manager</h1><span>v${VERSION}</span></div>
                         </div>
+                        <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
                         <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
                     </header>
                     <main class="pmp18-content" style="padding:24px">
@@ -229,6 +230,7 @@ export function renderManagerInner() {
                     <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
                     <div><h1>Persona Manager</h1><span>v${VERSION}</span></div>
                 </div>
+                <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
                 <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
             </header>
             ${inCompare ? renderCompareWorkspace(personas) : `
@@ -296,7 +298,7 @@ export function ensureRoot() {
         const action = target.dataset.action;
 
         if (action === 'close') {
-            if (target.classList.contains('pmp18-backdrop') || target.classList.contains('pmp18-close')) closeManager();
+            if (target.classList.contains('pmp18-backdrop') || target.closest('[data-action="close"]')) closeManager();
             return;
         }
         if (action === 'tab') {
@@ -306,6 +308,12 @@ export function ensureRoot() {
             state.baselineId = null;
             state.focusOtherId = null;
             if (state.tab === 'settings' && !state.updateInfo?.checked) checkForUpdates();
+            renderManager();
+            return;
+        }
+        if (action === 'refresh-list') {
+            invalidatePersonaCache('manual-refresh');
+            if (typeof toastr !== 'undefined') toastr.info('已刷新人设列表');
             renderManager();
             return;
         }
@@ -528,10 +536,17 @@ export function openManager(tab = 'all') {
     state.compareIds = [];
     state.baselineId = null;
     state.focusOtherId = null;
+    invalidatePersonaCache('openManager');
     const root = document.getElementById(ROOT_ID);
     root.hidden = false;
     document.body.classList.add('pmp18-open');
     renderManager();
+    // Merge any new avatar files ST created while we were closed
+    syncPersonasFromAvatarFiles().then(changed => {
+        if (!state.active) return;
+        invalidatePersonaCache('openManager-sync');
+        renderManager();
+    }).catch(() => {});
 }
 
 export function closeManager() {
