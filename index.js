@@ -1,17 +1,18 @@
 /**
- * Persona Manager v1.8.13
+ * Persona Manager v1.8.14
  * - Mobile CSS: viewport/100dvh + tap target sizes
  * - Entry z-index/pointer-events fix (fullscreen mobile)
  * - Compare workspace stacks vertically on narrow screens
  * - Update: fallback to several install paths; clear manual instructions if all fail
  * - Mobile compare: shrink baseline/other buttons, scrollable workspace, capped share panel
  * - Mobile editor: fullscreen with flex body so textarea stays visible
+ * - Preserve scroll position across re-renders (compare page no longer jumps to top)
  */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.13';
+const VERSION = '1.8.14';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -985,6 +986,22 @@ function renderManager() {
     const similarCount = state.tab === 'similar' ? getSimilarPairs(personas).length : 0;
     const inCompare = state.compareIds.length >= 2;
 
+    // Preserve scroll position across re-renders. innerHTML replacement resets
+    // scrollTop to 0 on every click (tab switch, baseline/other change, search
+    // typing, checkbox toggle, etc.). On mobile compare page this is especially
+    // painful because the workspace scrolls as a whole.
+    const prevContent = root.querySelector('.pmp18-content');
+    const prevCompare = root.querySelector('.pmp18-compare-workspace');
+    const savedScroll = {
+        content: prevContent ? prevContent.scrollTop : 0,
+        compare: prevCompare ? prevCompare.scrollTop : 0,
+    };
+    const savedTabBar = root.querySelector('.pmp18-tabs');
+    const savedTabScroll = savedTabBar ? savedTabBar.scrollLeft : 0;
+    const focusKey = document.activeElement?.dataset?.pmp18KeepFocus;
+    const focusSel = focusKey ? document.activeElement?.selectionStart : null;
+    const focusEnd = focusKey ? document.activeElement?.selectionEnd : null;
+
     const selectionHint = state.selected.size >= 2
         ? `<div class="pmp18-selection-bar">
             <div><strong>已选 ${state.selected.size} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
@@ -1009,7 +1026,7 @@ function renderManager() {
             <div class="pmp18-toolbar">
                 <div class="pmp18-search">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input id="pmp18-search" type="search" value="${escapeHtml(state.query)}" placeholder="搜索…" autocomplete="off">
+                    <input id="pmp18-search" data-pmp18-keep-focus="search" type="search" value="${escapeHtml(state.query)}" placeholder="搜索…" autocomplete="off">
                     ${state.query ? '<button data-action="clear-search"><i class="fa-solid fa-xmark"></i></button>' : ''}
                 </div>
                 <div class="pmp18-stats">
@@ -1029,6 +1046,25 @@ function renderManager() {
             <main class="pmp18-content">${renderManagerContent(personas)}</main>
             ${selectionHint}`}
         </section>`;
+
+    // Restore scroll positions. Use rAF so the browser has finished layout.
+    requestAnimationFrame(() => {
+        const newContent = root.querySelector('.pmp18-content');
+        if (newContent) newContent.scrollTop = savedScroll.content;
+        const newCompare = root.querySelector('.pmp18-compare-workspace');
+        if (newCompare) newCompare.scrollTop = savedScroll.compare;
+        const newTabBar = root.querySelector('.pmp18-tabs');
+        if (newTabBar) newTabBar.scrollLeft = savedTabScroll;
+        if (focusKey) {
+            const el = root.querySelector(`[data-pmp18-keep-focus="${CSS.escape(focusKey)}"]`);
+            if (el) {
+                el.focus();
+                if (focusSel != null && typeof el.setSelectionRange === 'function') {
+                    try { el.setSelectionRange(focusSel, focusEnd); } catch { /* ignore */ }
+                }
+            }
+        }
+    });
 }
 
 /* ---------- Editor (id locked at open) ---------- */
