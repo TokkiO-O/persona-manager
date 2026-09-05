@@ -1,6 +1,7 @@
 import { COMMON_STOPWORDS } from './constants.js';
 import { state } from './state.js';
 import { escapeHtml, normalizeText } from './util.js';
+import { similarity } from './similarity.js';
 
 /* ---------- Diff engine ---------- */
 

@@ -6,7 +6,7 @@ import {
     extractSharedSnippets, renderFragmentCompare, renderFocusBlocks, renderCompareLegend
 } from '../diff.js';
 import { formatPersonaSubline } from '../persona-data.js';
-import { renderAvatar } from './components.js';
+import { renderAvatar, emptyState } from './components.js';
 
 export function renderCompareWorkspace(personas) {
     const ids = state.compareIds.filter(id => personas.some(p => p.id === id));

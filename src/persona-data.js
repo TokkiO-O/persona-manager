@@ -1,42 +1,15 @@
+import { power_user } from '../power-user-bridge.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';
 
-/** Resolve power_user without brittle relative paths (works for data/ and third-party/). */
-function getPowerUser() {
+function hasPowerUser() {
     try {
-        const ctx = window.SillyTavern?.getContext?.();
-        if (ctx?.powerUser) return ctx.powerUser;
-        if (ctx?.power_user) return ctx.power_user;
-    } catch { /* ignore */ }
-    try {
-        if (window.power_user) return window.power_user;
-    } catch { /* ignore */ }
-    return null;
+        return !!(power_user && typeof power_user === 'object');
+    } catch {
+        return false;
+    }
 }
-
-// Proxy so existing `power_user.xxx` reads work; mutations hit the live object.
-const power_user = new Proxy({}, {
-    get(_t, prop) {
-        const pu = getPowerUser();
-        if (!pu) {
-            if (prop === 'personas' || prop === 'persona_descriptions') return {};
-            return undefined;
-        }
-        const v = pu[prop];
-        return typeof v === 'function' ? v.bind(pu) : v;
-    },
-    set(_t, prop, value) {
-        const pu = getPowerUser();
-        if (!pu) return false;
-        pu[prop] = value;
-        return true;
-    },
-    has(_t, prop) {
-        const pu = getPowerUser();
-        return pu ? prop in pu : false;
-    },
-});
 
 /* ---------- Persona read / write (id-safe) ---------- */
 
@@ -95,8 +68,13 @@ export function invalidatePersonaCache(reason) {
 export function getPersonaData() {
     if (_personaCache) return _personaCache.items;
 
-    const personas = power_user?.personas || {};
-    const descriptions = power_user?.persona_descriptions || {};
+    if (!hasPowerUser()) {
+        console.warn(`[${EXT}] power_user unavailable — persona list empty`);
+        return []; // do NOT cache empty when power_user missing
+    }
+
+    const personas = power_user.personas || {};
+    const descriptions = power_user.persona_descriptions || {};
     const items = Object.entries(personas).map(([id, rawName]) => {
         const name = String(rawName ?? id);
         const rawDesc = descriptions?.[id];
@@ -111,6 +89,8 @@ export function getPersonaData() {
             descriptionKey: normalizeText(description),
         };
     });
+    // Only cache non-empty; empty is valid only when user truly has zero personas
+    // but still cache it so we don't re-parse every frame — power_user is present.
     _personaCache = { items, version: ++_personaVersion };
     return items;
 }
@@ -154,7 +134,7 @@ export function emitPersonaUpdated(id) {
  */
 export function persistPersonaDescription(targetId, description) {
     const id = String(targetId || '');
-    if (!id || !power_user) {
+    if (!id || !hasPowerUser()) {
         console.error(`[${EXT}] persist blocked: invalid id`, targetId);
         return false;
     }
@@ -200,7 +180,7 @@ export function persistPersonaDescription(targetId, description) {
 
 export function persistPersonaFull(targetId, name, description) {
     const id = String(targetId || '');
-    if (!id || !power_user) {
+    if (!id || !hasPowerUser()) {
         console.error(`[${EXT}] persistFull blocked: invalid id`, targetId);
         return false;
     }
@@ -212,7 +192,7 @@ export function persistPersonaFull(targetId, name, description) {
 
 export function deletePersonaById(targetId) {
     const id = String(targetId || '');
-    if (!id || !power_user) return false;
+    if (!id || !hasPowerUser()) return false;
     if (!power_user.personas || !(id in power_user.personas)) {
         console.error(`[${EXT}] delete: id not found`, id);
         return false;

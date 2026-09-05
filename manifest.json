@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.9.2",
-  "description": "修复 components.js 损坏的 import 导致扩展无法加载（入口消失）。",
+  "version": "1.9.3",
+  "description": "修复 power_user 读取、diff similarity 导入、compare emptyState。",
   "hooks": {
     "update": "onUpdate"
   }
