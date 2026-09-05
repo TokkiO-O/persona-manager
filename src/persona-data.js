@@ -1,4 +1,4 @@
-import { power_user } from '../../../power-user.js';
+import { power_user } from '../../../../power-user.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';

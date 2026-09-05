@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.9.0",
-  "description": "Persona 管理（模块化）：对比、相似检测、编辑/删除、更新检查。",
+  "version": "1.9.1",
+  "description": "Persona 管理（模块化）：修复 src 内 power-user 路径导致入口丢失。",
   "hooks": {
     "update": "onUpdate"
   }

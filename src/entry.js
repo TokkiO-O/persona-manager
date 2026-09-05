@@ -1,7 +1,17 @@
 import { BUTTON_ID, ENTRY_MARK, EXT } from './constants.js';
-import { openManager } from './ui/render.js';
 
-/* ---------- Entry ---------- */
+/** Filled by index.js after modules load — avoids import cycle with ui/render */
+let _openManager = () => {
+    if (typeof window.openPersonaManager === 'function') {
+        window.openPersonaManager();
+        return;
+    }
+    console.warn(`[${EXT}] openManager not ready`);
+};
+
+export function setEntryOpenManager(fn) {
+    if (typeof fn === 'function') _openManager = fn;
+}
 
 export function findEntryAnchor() {
     for (const id of ['persona-management-block', 'user-settings-block-content', 'user-settings-block']) {
@@ -28,7 +38,7 @@ export function makeEntry(floating = false) {
     entry.innerHTML = floating
         ? '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span>'
         : '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
-    entry.addEventListener('click', () => openManager('all'));
+    entry.addEventListener('click', () => _openManager('all'));
     return entry;
 }
 
@@ -56,7 +66,6 @@ export function injectFloatingEntry() {
 export function installEntryObserver() {
     if (window.__pmp18EntryInstalled) return;
     window.__pmp18EntryInstalled = true;
-    window.openPersonaManager = () => openManager('all');
 
     if (injectEntry()) return;
 
@@ -91,4 +100,3 @@ export function installEntryObserver() {
     document.getElementById('persona-management-button')?.addEventListener('click', () => setTimeout(injectEntry, 200));
     document.getElementById('user-settings-button')?.addEventListener('click', () => setTimeout(injectEntry, 200));
 }
-
