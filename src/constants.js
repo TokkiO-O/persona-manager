@@ -1,1 +1,30 @@
+/** Shared constants for Persona Manager */
 
+export const EXT = 'Persona Manager';
+export const VERSION = '1.9.0';
+export const ROOT_ID = 'pmp18-root';
+export const BUTTON_ID = 'pmp18-entry';
+export const ENTRY_MARK = 'pmp18-entry-installed';
+export const STORAGE_KEY = 'pmp18_settings';
+export const REMOTE_MANIFEST = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json';
+export const REMOTE_CHANGELOG = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/CHANGELOG.md';
+
+/** Words that produce noisy "shared" matches across unrelated personas */
+export const COMMON_STOPWORDS = new Set([
+    '身高', '体重', '三围', '年龄', '血型', '星座', '性别', '种族', '国籍',
+    '发色', '发型', '发长', '瞳色', '眼睛', '肤色', '身材', '体型', '外貌',
+    '性格', '特点', '特征', '属性', '设定', '背景', '简介', '描述',
+    '身份', '职业', '能力', '技能', '爱好', '喜欢', '讨厌', '擅长',
+    '温柔', '可爱', '美丽', '漂亮', '帅气', '冷酷', '高冷', '傲娇', '腹黑',
+    '开朗', '内向', '外向', '活泼', '安静', '沉默', '冷漠', '热情',
+    'kg', 'cm', 'mm', '岁', '年', '月', '日',
+    '名字', '备注', '标题', '版本', '作者', '用户', '人设',
+    '故事', '世界', '时间', '地点', '场景',
+]);
+
+export const defaultSettings = {
+    similarityThreshold: 0.55,
+    includeSameNameInSimilar: true,
+    showDiffOnly: false,
+    softMatchThreshold: 0.35,
+};
