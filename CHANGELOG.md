@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.18
+
+- **关键修复：点击入口按钮无反应 + 整页卡死**
+  根因：`COMMON_STOPWORDS` const 在 705 行声明，但 `extractSharedSnippets` 在 682 行就引用它 → TDZ `ReferenceError` → `renderManager` 抛错后 `root.innerHTML` 没赋值但 `body.pmp18-open { overflow: hidden }` 已加 → 看起来"卡死"
+  修复：把 `COMMON_STOPWORDS` 移到文件顶部（§1 后），先于 `extractSharedSnippets`
+  修复：给 `renderManager` 包 try-catch，抛错时显示错误屏而非半渲染，按钮可点 Esc/关闭退出
+
 ## v1.8.17
 
 - **性能：人设数据加缓存**：新增 `_personaCache`，避免每次 render 重新解析所有 persona 的 description / title / normalize
@@ -35,6 +42,12 @@
 - 移动端编辑框：全屏+flex 布局，textarea 用 `flex:1 1 auto; min-height:0`，避免被键盘顶到屏幕外
 - 移动端对比卡：other-card 改为两列网格，avatar 缩到 26px，文字两行省略
 
+## v1.8.13
+
+- 移动端对比页：基准/对象按钮变小、share-panel 设 max-height 并可滚动、对比工作区改为整页滚动而不是被 flex 切碎
+- 移动端编辑框：全屏+flex 布局，textarea 用 `flex:1 1 auto; min-height:0`，避免被键盘顶到屏幕外
+- 移动端对比卡：other-card 改为两列网格，avatar 缩到 26px，文字两行省略
+
 ## v1.8.12
 
 - 手机端 CSS 适配：使用 `100dvh` 处理移动浏览器地址栏导致的窗口塌陷；窗口默认铺满、去掉圆角
@@ -42,6 +55,15 @@
 - 移动端单列/双列自适应卡片网格、tab 横向滚动
 - 对比页在窄屏下改为上下堆叠（左右双列易被压扁）
 - 编辑器弹窗移动端全屏化
+- 更新：扩展装在第三方目录时自动尝试多种路径；都失败时给出 GitHub 手动下载指引
+
+## v1.8.12
+
+- 手机端 CSS 适配：使用 `100dvh` 处理移动浏览器地址栏导致的窗口塌陷；窗口默认铺满、去掉圆角
+- 入口按钮 `pointer-events:auto` + 提高 z-index，修复全屏浏览器点不动的问题
+- 移动端单列/双列自适应卡片网格、tab 横向滚动
+- 对比页在窄屏下改为上下堆叠（左右双列易被压扁）
+- 编辑器弹窗移动端全屁全屏化
 - 更新：扩展装在第三方目录时自动尝试多种路径；都失败时给出 GitHub 手动下载指引
 
 ## v1.8.10
