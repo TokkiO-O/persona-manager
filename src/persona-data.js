@@ -298,16 +298,19 @@ export async function deletePersonaById(targetId) {
     } catch { /* ignore */ }
 
     // 4) Refresh native persona list / remove DOM leftovers
-    try {
-        if (typeof window.getUserAvatars === 'function') {
-            await window.getUserAvatars(true);
-        } else {
-            const ctx = window.SillyTavern?.getContext?.();
-            if (typeof ctx?.getUserAvatars === 'function') await ctx.getUserAvatars(true);
+    // Defer native list refresh so it does not tear down our open manager UI
+    setTimeout(async () => {
+        try {
+            if (typeof window.getUserAvatars === 'function') {
+                await window.getUserAvatars(true);
+            } else {
+                const ctx = window.SillyTavern?.getContext?.();
+                if (typeof ctx?.getUserAvatars === 'function') await ctx.getUserAvatars(true);
+            }
+        } catch (e) {
+            console.warn(`[${EXT}] getUserAvatars refresh failed`, e);
         }
-    } catch (e) {
-        console.warn(`[${EXT}] getUserAvatars refresh failed`, e);
-    }
+    }, 0);
     try {
         document.querySelectorAll(`[data-avatar-id="${CSS.escape(avatarKey)}"]`).forEach(el => {
             const card = el.closest('.avatar-container, .persona_block, [class*="persona"]');

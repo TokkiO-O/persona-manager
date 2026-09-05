@@ -1,124 +1,89 @@
 # Changelog
 
+## v1.9.9
+
+- **多选删除**：底部选择栏增加「删除所选」，一次确认后批量删除
+- **删除后保持管理器打开**：不再关界面，直接刷新列表
+- 单条删除同样保持界面打开
+
 ## v1.9.8
 
-- **修复误报更新**：版本比较改为语义化（仅当远程 > 本地才提示有更新；本地 1.9.7 不会再把远程 1.9.6 当成新版本）
-- 删除：`/api/avatars/delete` + `powerUserSettings` 双写清理；HTTP 失败会明确报错
-- 删除后尝试刷新原生人设列表并移除残留 DOM
-
-- 删除：`/api/avatars/delete` + `powerUserSettings` 双写清理；HTTP 失败会明确报错
-- 删除后尝试刷新原生人设列表并移除残留 DOM
-
+- **修复误报更新**：版本比较改为语义化（仅当远程 > 本地才提示有更新）
+- 删除：`/api/avatars/delete` + `powerUserSettings` 双写；失败明确报错
+- 删除后尝试刷新原生人设列表
 
 ## v1.9.7
 
-- 删除人设：调用 `/api/avatars/delete` 删除头像文件，避免原界面再次出现
+- 删除人设：调用 `/api/avatars/delete` 删除头像文件
 - 删除二次确认：优先用酒馆 Popup，兼容 TauriTavern
-
 
 ## v1.9.6
 
 - 远程仓库改为 `TokkiO-O/persona-manager`（manifest / CHANGELOG / 更新镜像）
 
-
 ## v1.9.5
 
-- 更新检查增加 gitmirror / ghproxy 等镜像，调整请求超时与 CORS 模式
+- 更新检查增加 gitmirror / ghproxy 等镜像
 - 全部镜像失败时说明「扩展仍可用，请手动下载」
-
 
 ## v1.9.4
 
-- 更新检查：GitHub raw 失败时自动回退 `cdn.jsdelivr.net` / `fastly.jsdelivr.net`
+- 更新检查：GitHub raw 失败时自动回退 jsDelivr
 - 设置页「无法连接」时显示具体错误信息
 
 ## v1.9.3
 
-- **修复读不到 Persona**：用扩展根目录 `power-user-bridge.js` 正式 re-export `power_user`（与旧单文件相同相对路径），去掉错误的 `getContext().powerUser` Proxy
-- `power_user` 不可用时不缓存空列表
-- `diff.js` 补上缺失的 `similarity` 导入（否则对比软匹配会 ReferenceError）
-- `compare.js` 补上缺失的 `emptyState` 导入
-- 写入/删除改为 `hasPowerUser()` 判断，避免 Proxy 恒为真导致静默失败
+- 修复读不到 Persona：`power-user-bridge.js` 正式 re-export
+- diff.js / compare.js 补全缺失 import
 
 ## v1.9.2
 
-- **修复入口消失**：`src/ui/components.js` 中 `import` 被插入破坏导致语法错误、整扩展无法加载
-- `power_user` 曾改为 getContext 探测（后续在 1.9.3 纠正为正式 import）
-- 入口观察器与浮动按钮兜底加强
+- 修复 `components.js` 损坏 import 导致入口消失
 
 ## v1.9.1
 
-- 修正 `src/` 下 `power-user` 相对路径深度（少一层 `../` 会导致模块加载失败）
-- `entry.js` 与 `render.js` 解耦，用 `setEntryOpenManager` 接线，避免循环依赖
+- 修正 src 内路径；entry 与 render 解耦
 
 ## v1.9.0
 
-- 代码拆分为 `src/` 多模块（ESM），入口仍为 `index.js`
-- 修复历史问题：`groupBy` 定义在 `util.js` 并正确引用
-- 行为对齐 v1.8.19
+- 代码拆分为 `src/` 多模块（ESM）
 
 ## v1.8.19
 
-- 修复 `ReferenceError: groupBy is not defined` 导致渲染失败
+- 修复 `groupBy is not defined`
 
 ## v1.8.18
 
-- **关键修复：点击入口按钮无反应 + 整页卡死**
-  根因：`COMMON_STOPWORDS` const 在 705 行声明，但 `extractSharedSnippets` 在 682 行就引用它 → TDZ `ReferenceError` → `renderManager` 抛错后 `root.innerHTML` 没赋值但 `body.pmp18-open { overflow: hidden }` 已加 → 看起来"卡死"
-  修复：把 `COMMON_STOPWORDS` 移到文件顶部（§1 后），先于 `extractSharedSnippets`
-  修复：给 `renderManager` 包 try-catch，抛错时显示错误屏而非半渲染，按钮可点 Esc/关闭退出
+- 修复入口无反应与整页卡死（COMMON_STOPWORDS TDZ）
 
 ## v1.8.17
 
-- **性能：人设数据加缓存**：新增 `_personaCache`，避免每次 render 重新解析所有 persona 的 description / title / normalize
-- **性能：分组/相似度加 memo**：`_groupMemo` 缓存 same-name / duplicate / similar 三种分组结果，相同 personas 列表直接返回
-- **性能：render 节流**：`scheduleRender()` 用 rAF 合并同一帧的多次 render，原生 persona 切换时 PERSONA_UPDATED 事件爆发不再卡顿
-- **PERSONA_UPDATED / PERSONA_DELETED 事件监听**：酒馆原生切换 persona / 删除 persona 时，自动 invalidate 缓存并重渲染（如果管理器开着）
-- **入口按钮修复**：把 `.pmp18-entry` 的 `position: relative` 改成 `isolation: isolate`，避免在某些 flex/overflow 父级里被裁切消失
-- **基准按钮宽度限制**：`.pmp18-base-btn-meta` 加 `max-width: 140px` + 强名 ellipsis，5+ 个同名同头像的基准按钮不再无限拉宽挤掉 baseline bar
-- **代码结构整理**：顶部加 §1-§14 模块注释，原 1697 行单文件按功能分段（数据/事件/分组/diff/UI/编辑器/更新/入口/键盘/init），便于后续维护
+- 人设数据缓存、分组 memo、render 节流、事件监听
 
 ## v1.8.16
 
-- 基准按钮加 avatar + 名字 + 副标题：5 个同名同头像无备注的人设也能区分
-- 共同片段提取规则收紧：长度下限 2→3；度量单位必须跟数字一起（不再单独高亮 `kg` / `cm`）
-- 新增 COMMON_STOPWORDS 黑名单：身高 / 三围 / 体重 / 性格 / 特点 / 性别 / 血型 / 发色 等通用描述词不参与"共同片段"
-- 更新检查加 cache-buster（`?t=...` 随机数），绕过 raw.githubusercontent.com 5-10 分钟 CDN 缓存，立即看到新版本
+- 基准按钮头像区分；共同片段规则收紧；更新 cache-buster
 
 ## v1.8.15
 
-- 选 persona checkbox / 清除选择 / 全选组 改为 in-place DOM 更新，不再触发 `renderManager()` 重渲染，彻底避免列表页回顶
-- 新增 `updateSelectionHint()` 函数，只替换底部 selection bar 一段 DOM
-- 1.8.14 的 scrollTop 恢复机制作为兜底保留
+- 选择改为 in-place DOM 更新，避免列表回顶
 
 ## v1.8.14
 
-- 保留 `pmp18-content` / `pmp18-compare-workspace` / `pmp18-tabs` 的 scrollTop + scrollLeft，重渲染后用 rAF 恢复
-- 保留搜索框光标和焦点，跨重渲染继续输入不会丢字
-- 注：v1.8.15 进一步把复选框改成 in-place 更新，不再依赖 scroll 恢复
+- 重渲染保留 scrollTop / 搜索焦点
 
 ## v1.8.13
 
-- 移动端对比页：基准/对象按钮变小、share-panel 设 max-height 并可滚动、对比工作区改为整页滚动而不是被 flex 切碎
-- 移动端编辑框：全屏+flex 布局，textarea 用 `flex:1 1 auto; min-height:0`，避免被键盘顶到屏幕外
-- 移动端对比卡：other-card 改为两列网格，avatar 缩到 26px，文字两行省略
+- 移动端对比与编辑布局优化
 
 ## v1.8.12
 
-- 手机端 CSS 适配：使用 `100dvh` 处理移动浏览器地址栏导致的窗口塌陷；窗口默认铺满、去掉圆角
-- 入口按钮 `pointer-events:auto` + 提高 z-index，修复全屏浏览器点不动的问题
-- 移动端单列/双列自适应卡片网格、tab 横向滚动
-- 对比页在窄屏下改为上下堆叠（左右双列易被压扁）
-- 编辑器弹窗移动端全屏化
-- 更新：扩展装在第三方目录时自动尝试多种路径；都失败时给出 GitHub 手动下载指引
+- 移动端入口可点、100dvh、更新路径候选
 
 ## v1.8.10
 
-- 备注/标题作为同名区分小字（无则短 ID）
-- 跨结构/低相似：共同片段列表 + 正文高亮
-- 列表删除人设（确认后写回）
-- 对比页图例说明各色块含义
+- 备注小字、共同片段、删除、对比图例
 
 ## v1.8.9
 
-- 修复设置内更新 CSRF（X-CSRF-Token）
+- 修复设置内更新 CSRF

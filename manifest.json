@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.8",
-  "description": "版本比较改为语义化：仅远程更高才提示更新；强化删除。",
+  "version": "1.9.9",
+  "description": "多选删除；删除后保持管理器打开。",
   "hooks": {
     "update": "onUpdate"
   }

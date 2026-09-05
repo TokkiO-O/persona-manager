@@ -114,10 +114,13 @@ export function updateSelectionHint(root) {
         ? `<div class="pmp18-selection-bar">
             <div><strong>已选 ${n} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
             <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
+            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
             <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
            </div>`
         : n === 1
-            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>请再选至少一个</span></div><button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
+            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>可再选以对比，或直接删除</span></div>
+            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
+            <button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
             : '';
     if (!html) {
         if (bar) bar.remove();
@@ -209,10 +212,13 @@ export function renderManagerInner() {
         ? `<div class="pmp18-selection-bar">
             <div><strong>已选 ${state.selected.size} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
             <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
+            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
             <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
            </div>`
         : state.selected.size === 1
-            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>请再选至少一个</span></div><button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
+            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>可再选以对比，或直接删除</span></div>
+            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
+            <button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
             : '';
 
     root.innerHTML = `
@@ -401,14 +407,58 @@ export function ensureRoot() {
                     const done = await deletePersonaById(id);
                     if (done) {
                         if (typeof toastr !== 'undefined') toastr.success(`已删除：${label}`);
-                        renderManager();
                     } else if (typeof toastr !== 'undefined') {
                         toastr.error('删除失败');
                     }
                 } catch (e) {
                     console.error(e);
                     if (typeof toastr !== 'undefined') toastr.error(`删除失败：${e?.message || e}`);
+                } finally {
+                    // Always keep manager open and refresh list
+                    state.active = true;
+                    ensureRoot();
+                    const root = document.getElementById(ROOT_ID);
+                    if (root) {
+                        root.hidden = false;
+                        document.body.classList.add('pmp18-open');
+                    }
+                    renderManager();
                 }
+            })();
+            return;
+        }
+        if (action === 'delete-selected') {
+            const ids = [...state.selected].map(String);
+            if (!ids.length) return;
+            (async () => {
+                const label = `已选 ${ids.length} 个人设`;
+                const ok = await confirmDeletePersona(label, ids.slice(0, 5).join(', ') + (ids.length > 5 ? '…' : ''));
+                if (!ok) return;
+                let okN = 0;
+                let failN = 0;
+                for (const id of ids) {
+                    try {
+                        const done = await deletePersonaById(id);
+                        if (done) okN += 1;
+                        else failN += 1;
+                    } catch (e) {
+                        console.error(e);
+                        failN += 1;
+                    }
+                }
+                state.selected.clear();
+                if (typeof toastr !== 'undefined') {
+                    if (okN) toastr.success(`已删除 ${okN} 个` + (failN ? `，失败 ${failN} 个` : ''));
+                    else toastr.error(`删除失败（${failN}）`);
+                }
+                state.active = true;
+                ensureRoot();
+                const root = document.getElementById(ROOT_ID);
+                if (root) {
+                    root.hidden = false;
+                    document.body.classList.add('pmp18-open');
+                }
+                renderManager();
             })();
             return;
         }
