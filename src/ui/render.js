@@ -7,7 +7,7 @@ import {
 import {
     getSameNameGroups, getExactDuplicateGroups, getSimilarPairs
 } from '../similarity.js';
-import { checkForUpdates, showUpdateModal } from '../update.js';
+import { checkForUpdates, showUpdateModal, scheduleAutoUpdateCheck } from '../update.js';
 import {
     renderAllView, renderSameNameView, renderDuplicateView, renderSimilarView, renderCard
 } from './components.js';
@@ -25,58 +25,16 @@ export function renderSettingsPanel() {
     const t = Math.round(state.settings.similarityThreshold * 100);
     const soft = Math.round((state.settings.softMatchThreshold ?? 0.35) * 100);
     const upd = state.updateInfo;
-    let updateBlock = `
-        <div class="pmp18-update-box" id="pmp18-update-box">
-            <div>
-                <div><b>当前版本</b> v${VERSION}</div>
-                <div class="pmp18-muted" id="pmp18-update-status">点击检查更新</div>
-            </div>
-            <button type="button" class="pmp18-small-btn" data-action="check-update" id="pmp18-check-btn">检查更新</button>
-        </div>`;
-
-    if (upd?.checking) {
-        updateBlock = `
-        <div class="pmp18-update-box">
-            <div><b>当前版本</b> v${VERSION}<div class="pmp18-muted">正在检查…</div></div>
-            <button type="button" class="pmp18-small-btn" disabled>检查中…</button>
-        </div>`;
-    } else if (upd?.available) {
-        updateBlock = `
-        <div class="pmp18-update-box is-new">
-            <div>
-                <div><b>发现新版本</b> v${escapeHtml(String(upd.remoteVersion || ''))}</div>
-                <div class="pmp18-muted">当前 v${VERSION}</div>
-            </div>
-            <button type="button" class="pmp18-primary-btn" data-action="show-update-modal">查看日志并更新</button>
-        </div>`;
-    } else if (upd?.checked && !upd.error) {
-        updateBlock = `
-        <div class="pmp18-update-box">
-            <div>
-                <div><b>已是最新版本</b> v${VERSION}</div>
-                <div class="pmp18-muted">远程 v${escapeHtml(String(upd.remoteVersion || '—'))} · 可查看日志</div>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button type="button" class="pmp18-small-btn" data-action="show-update-modal">更新日志</button>
-                <button type="button" class="pmp18-small-btn" data-action="check-update">重新检查</button>
-            </div>
-        </div>`;
+    let tip = '';
+    if (upd?.available) {
+        tip = `<div class="pmp18-muted" style="margin-bottom:10px">发现新版本 v${escapeHtml(String(upd.remoteVersion))} — 点击左上角版本号查看并更新</div>`;
     } else if (upd?.error) {
-        updateBlock = `
-        <div class="pmp18-update-box">
-            <div>
-                <div><b>当前版本</b> v${VERSION}</div>
-                <div class="pmp18-muted">无法连接更新源</div>
-                <div class="pmp18-muted" style="word-break:break-all;font-size:11px">${escapeHtml(String(upd.message || '网络错误'))}</div>
-                <div class="pmp18-muted" style="font-size:11px;margin-top:4px">${escapeHtml(String(upd.hint || '扩展可正常使用；请到 GitHub 手动下载覆盖。'))}</div>
-            </div>
-            <button type="button" class="pmp18-small-btn" data-action="check-update">重试</button>
-        </div>`;
+        tip = `<div class="pmp18-muted" style="margin-bottom:10px">无法检查更新（不影响使用）。可点左上角版本号重试。</div>`;
     }
 
     return `
         <div class="pmp18-settings">
-            ${updateBlock}
+            ${tip}
             <div class="pmp18-settings-row">
                 <label>相似检测阈值 <b id="pmp18-th-val">${t}%</b></label>
                 <input type="range" id="pmp18-threshold" min="30" max="90" step="5" value="${t}">
@@ -163,7 +121,9 @@ export function renderManager() {
                     <header class="pmp18-header">
                         <div class="pmp18-brand">
                             <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
-                            <div><h1>Persona Manager</h1><span>v${VERSION}</span></div>
+                            <div><h1>Persona Manager</h1>
+                            <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}</button>
+                        </div>
                         </div>
                         <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
                         <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
@@ -228,7 +188,9 @@ export function renderManagerInner() {
             <header class="pmp18-header">
                 <div class="pmp18-brand">
                     <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
-                    <div><h1>Persona Manager</h1><span>v${VERSION}</span></div>
+                    <div><h1>Persona Manager</h1>
+                            <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}</button>
+                        </div>
                 </div>
                 <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
                 <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
@@ -470,6 +432,10 @@ export function ensureRoot() {
             })();
             return;
         }
+        if (action === 'open-update-modal') {
+            showUpdateModal();
+            return;
+        }
         if (action === 'check-update') {
             checkForUpdates();
             return;
@@ -531,6 +497,7 @@ export function ensureRoot() {
 export function openManager(tab = 'all') {
     ensureRoot();
     state.active = true;
+    scheduleAutoUpdateCheck();
     state.tab = tab;
     state.selected.clear();
     state.compareIds = [];

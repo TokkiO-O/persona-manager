@@ -1077,3 +1077,111 @@ mark.pmp18-share {
         grid-template-columns: 1fr !important;
     }
 }
+
+
+/* Version button (looks like plain text) */
+.pmp18-version-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.2;
+    opacity: .58;
+    color: inherit;
+    cursor: pointer;
+}
+.pmp18-version-btn:hover {
+    opacity: .95;
+    text-decoration: underline;
+}
+.pmp18-version-btn .pmp18-new {
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: .02em;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #e85d4c;
+    color: #fff;
+    opacity: 1;
+}
+
+/* Update modal — solid panel, above manager */
+.pmp18-update-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100002;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(10, 10, 14, .55);
+    backdrop-filter: blur(3px);
+}
+.pmp18-update-modal {
+    width: min(520px, 100%);
+    max-height: min(80vh, 640px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,.12);
+    background: var(--SmartThemeBlurTintColor, #1a1b22);
+    color: inherit;
+    box-shadow: 0 16px 48px rgba(0,0,0,.45);
+    overflow: hidden;
+}
+.pmp18-update-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.pmp18-update-modal-header strong { font-size: 15px; }
+.pmp18-update-modal-x {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: .65;
+}
+.pmp18-update-modal-x:hover { opacity: 1; }
+.pmp18-update-modal-body {
+    padding: 14px 16px;
+    overflow: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.pmp18-update-modal-meta {
+    margin: 0 0 10px;
+    font-size: 13px;
+}
+.pmp18-update-modal .pmp18-changelog {
+    margin: 0;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(255,255,255,.06);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.55;
+    max-height: 42vh;
+    overflow: auto;
+}
+.pmp18-update-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255,255,255,.08);
+}

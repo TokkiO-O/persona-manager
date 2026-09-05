@@ -4,6 +4,7 @@
 
 import { EXT, VERSION } from './src/constants.js';
 import { ensureRoot, openManager, closeManager, renderManager, scheduleRender } from './src/ui/render.js';
+import { scheduleAutoUpdateCheck } from './src/update.js';
 import { setEditorAfterSave } from './src/ui/editor.js';
 import { setUpdateUiRefresh } from './src/update.js';
 import { installEntryObserver, setEntryOpenManager } from './src/entry.js';
@@ -38,6 +39,7 @@ async function init() {
     installKeyboardHandler();
     installEntryObserver();
     installPersonaListener();
+    scheduleAutoUpdateCheck();
     console.log(`[${EXT}] v${VERSION} loaded (modular)`);
 }
 

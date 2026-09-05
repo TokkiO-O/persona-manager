@@ -132,9 +132,12 @@ export async function updateViaApi(payload) {
     }
 }
 
-export async function checkForUpdates() {
-    state.updateInfo = { checking: true };
-    if (state.tab === 'settings') refreshUi();
+export async function checkForUpdates(options = {}) {
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+        state.updateInfo = { ...(state.updateInfo || {}), checking: true };
+        if (state.tab === 'settings') refreshUi();
+    }
     try {
         const manifestResults = [];
         for (const url of REMOTE_MANIFEST_URLS) {
@@ -201,7 +204,7 @@ export async function checkForUpdates() {
         };
         console.error(`[${EXT}] update check failed`, e);
     }
-    if (state.tab === 'settings' || state.active) refreshUi();
+    if (state.active) refreshUi();
     return state.updateInfo;
 }
 
@@ -233,39 +236,36 @@ export function extractChangelogForVersion(md, version) {
 }
 
 export async function showUpdateModal() {
-    // Always re-fetch so modal is not stuck on a stale in-memory changelog
+    // Silent re-fetch: update state only, do not flip settings panel into「正在检查」
     try {
-        await checkForUpdates();
+        await checkForUpdates({ silent: true });
     } catch (e) {
-        console.warn(`[${EXT}] re-fetch before modal failed`, e);
+        console.warn(`[${EXT}] modal re-fetch failed`, e);
     }
     const info = state.updateInfo || {};
-    const log = extractChangelogForVersion(info.changelog || '', info.remoteVersion);
+    const log = extractChangelogForVersion(info.changelog || '', info.remoteVersion || VERSION);
     const available = Boolean(info.available);
-    const sourceLine = [info.source, info.changelogSource].filter(Boolean).join(' · ');
     const overlay = document.createElement('div');
-    overlay.className = 'pmp18-editor-overlay';
+    overlay.className = 'pmp18-editor-overlay pmp18-update-overlay';
     overlay.innerHTML = `
-        <div class="pmp18-editor-panel pmp18-update-modal">
-            <header class="pmp18-editor-header">
+        <div class="pmp18-update-modal" role="dialog" aria-modal="true">
+            <header class="pmp18-update-modal-header">
                 <strong>${available ? '发现新版本' : '更新日志'}</strong>
-                <button type="button" class="pmp18-editor-cancel" aria-label="关闭">×</button>
+                <button type="button" class="pmp18-update-modal-x" data-close aria-label="关闭">×</button>
             </header>
-            <div class="pmp18-editor-body">
-                <p>当前 <b>v${VERSION}</b>${info.remoteVersion ? ` · 远程 <b>v${escapeHtml(String(info.remoteVersion))}</b>` : ''}
-                ${available ? '' : ' <span class="pmp18-muted">（已是最新或远程不高于本地）</span>'}</p>
-                ${sourceLine ? `<p class="pmp18-muted" style="font-size:11px;word-break:break-all">来源：${escapeHtml(sourceLine)}</p>` : ''}
-                <pre class="pmp18-changelog">${escapeHtml(log)}</pre>
+            <div class="pmp18-update-modal-body">
+                <p class="pmp18-update-modal-meta">当前 <b>v${VERSION}</b>${info.remoteVersion ? ` · 远程 <b>v${escapeHtml(String(info.remoteVersion))}</b>` : ''}</p>
+                <pre class="pmp18-changelog">${escapeHtml(log || '（无日志）')}</pre>
             </div>
-            <footer class="pmp18-editor-footer">
-                <button type="button" class="pmp18-small-btn pmp18-editor-cancel">关闭</button>
-                ${available ? '<button type="button" class="pmp18-primary-btn pmp18-do-update">立即更新</button>' : ''}
+            <footer class="pmp18-update-modal-footer">
+                <button type="button" class="pmp18-small-btn" data-close>关闭</button>
+                ${available ? '<button type="button" class="pmp18-primary-btn" data-do-update>更新</button>' : ''}
             </footer>
         </div>`;
     const close = () => overlay.remove();
-    overlay.querySelectorAll('.pmp18-editor-cancel').forEach(btn => { btn.onclick = close; });
+    overlay.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = close; });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    const doBtn = overlay.querySelector('.pmp18-do-update');
+    const doBtn = overlay.querySelector('[data-do-update]');
     if (doBtn) {
         doBtn.onclick = async () => {
             doBtn.disabled = true;
@@ -276,12 +276,20 @@ export async function showUpdateModal() {
                 setTimeout(() => location.reload(), 500);
             } catch (e) {
                 doBtn.disabled = false;
-                doBtn.textContent = '立即更新';
-                const msg = e?.message || String(e);
-                if (typeof toastr !== 'undefined') toastr.error(`更新失败：${msg}`);
+                doBtn.textContent = '更新';
+                if (typeof toastr !== 'undefined') toastr.error(`更新失败：${e?.message || e}`);
                 console.error(`[${EXT}] update failed`, e);
             }
         };
     }
     document.body.appendChild(overlay);
+}
+
+export function scheduleAutoUpdateCheck() {
+    if (window.__pmp18UpdateChecked) return;
+    window.__pmp18UpdateChecked = true;
+    // Defer so first paint is not blocked
+    setTimeout(() => {
+        checkForUpdates({ silent: true }).catch(() => {});
+    }, 800);
 }

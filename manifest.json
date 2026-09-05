@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.13",
-  "description": "更新日志多源对齐最高版本；打开弹窗强制重拉并显示来源 URL。",
+  "version": "1.9.14",
+  "description": "版本号可点开更新日志；自动检查并显示 NEW；弹窗实心底框。",
   "hooks": {
     "update": "onUpdate"
   }
