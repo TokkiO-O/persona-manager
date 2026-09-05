@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.8.18",
-  "description": "Persona 管理：备注区分、跨结构共同片段、删除人设、对比",
+  "version": "1.9.0",
+  "description": "Persona 管理（模块化）：对比、相似检测、编辑/删除、更新检查。",
   "hooks": {
     "update": "onUpdate"
   }
