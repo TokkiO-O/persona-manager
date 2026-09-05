@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.8.13
+
+- 移动端对比页：基准/对象按钮变小、share-panel 设 max-height 并可滚动、对比工作区改为整页滚动而不是被 flex 切碎
+- 移动端编辑框：全屏+flex 布局，textarea 用 `flex:1 1 auto; min-height:0`，避免被键盘顶到屏幕外
+- 移动端对比卡：other-card 改为两列网格，avatar 缩到 26px，文字两行省略
+
 ## v1.8.12
 
 - 手机端 CSS 适配：使用 `100dvh` 处理移动浏览器地址栏导致的窗口塌陷；窗口默认铺满、去掉圆角

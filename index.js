@@ -1,15 +1,17 @@
 /**
- * Persona Manager v1.8.12
+ * Persona Manager v1.8.13
  * - Mobile CSS: viewport/100dvh + tap target sizes
  * - Entry z-index/pointer-events fix (fullscreen mobile)
  * - Compare workspace stacks vertically on narrow screens
  * - Update: fallback to several install paths; clear manual instructions if all fail
+ * - Mobile compare: shrink baseline/other buttons, scrollable workspace, capped share panel
+ * - Mobile editor: fullscreen with flex body so textarea stays visible
  */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.12';
+const VERSION = '1.8.13';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';

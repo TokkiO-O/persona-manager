@@ -959,6 +959,18 @@ mark.pmp18-share {
     .pmp18-check { top: 11px; left: 10px; }
     .pmp18-check input { width: 18px; height: 18px; }
 
+    /* Compare workspace: switch from fixed-height flex to scrolling layout.
+       The original used three flex:0 0 auto bars (topbar/baseline/others) on top
+       of a focus-wrap — on mobile those bars wrapped into many rows and crushed
+       the diff area. Now we let the whole workspace scroll vertically and the
+       diff body is a single column. */
+    .pmp18-compare-workspace {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
     .pmp18-compare-topbar {
         flex-wrap: wrap;
         gap: 8px;
@@ -966,31 +978,83 @@ mark.pmp18-share {
     }
     .pmp18-compare-title { flex: 1 1 100%; order: 2; }
     .pmp18-back-btn { order: 1; }
-    .pmp18-compare-tools { order: 3; width: 100%; }
+    .pmp18-compare-tools { order: 3; width: 100%; gap: 4px; }
+    .pmp18-compare-tools .pmp18-small-btn,
+    .pmp18-compare-tools .pmp18-primary-btn { flex: 1 1 auto; padding: 6px 8px; font-size: 12px; }
 
     .pmp18-baseline-bar,
-    .pmp18-others-strip { padding: 8px 12px; }
+    .pmp18-others-strip { padding: 6px 10px; gap: 6px; }
+    .pmp18-baseline-label { font-size: 11px; }
+    .pmp18-baseline-list { gap: 4px; }
+    .pmp18-base-btn {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+    .pmp18-base-btn small { display: none; }
+
+    .pmp18-others-scroll {
+        flex-wrap: wrap;
+        gap: 4px;
+        overflow-x: visible;
+        overflow-y: visible;
+    }
+    .pmp18-other-card {
+        flex: 1 1 calc(50% - 4px);
+        min-width: 0;
+        max-width: none;
+        padding: 5px 6px;
+        gap: 5px;
+    }
+    .pmp18-other-card .pmp18-avatar { width: 26px; height: 26px; flex-basis: 26px; }
+    .pmp18-other-card-meta strong { font-size: 11px; }
+    .pmp18-other-card-meta span { font-size: 10px; }
+
+    .pmp18-detail-meta { padding: 4px 12px 6px; font-size: 12px; gap: 6px; }
 
     .pmp18-focus-wrap {
         flex-direction: column;
-        overflow-y: auto;
-        overflow-x: hidden;
+        overflow: visible;
+        padding: 6px 10px 20px;
+        gap: 10px;
     }
     .pmp18-focus-wrap .pmp18-hcol-base,
     .pmp18-focus-wrap .pmp18-hcol-other {
         flex: 0 0 auto;
         max-width: none;
         width: 100%;
-        border-right: none;
-        border-left: none;
+        height: auto;
+        max-height: none;
+        border: 1px solid rgba(127,127,127,.16);
         border-radius: 12px;
-        margin-bottom: 10px;
+        margin-bottom: 0;
     }
+    .pmp18-hcol-body { max-height: none; }
 
-    .pmp18-legend { padding: 8px 12px; gap: 6px 10px; font-size: 10px; }
+    .pmp18-legend { padding: 6px 10px; gap: 4px 8px; font-size: 10px; }
+    .pmp18-legend-note { display: none; }
 
-    .pmp18-editor { width: 100%; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
+    /* Share panel: collapse on mobile so it doesn't fill the screen with chips */
+    .pmp18-share-panel { margin: 4px 10px 0; padding: 8px 10px; }
+    .pmp18-share-list { max-height: 110px; overflow-y: auto; gap: 4px; }
+    .pmp18-share-chip { font-size: 10px; padding: 2px 6px; }
+    .pmp18-col-block.frag { max-height: 280px; overflow-y: auto; }
+
     .pmp18-editor-overlay { padding: 0; }
+    .pmp18-editor {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    .pmp18-editor-ta { flex: 1 1 auto; min-height: 0; margin: 8px 12px; }
+    .pmp18-editor-name { margin: 4px 12px 8px; }
+    .pmp18-editor-label { margin: 4px 12px 2px; }
 }
 
 @media (max-width: 420px) {
