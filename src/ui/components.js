@@ -1,6 +1,9 @@
 import { state } from '../state.js';
 import { escapeHtml, normalizeText } from '../util.js';
 import {
+    getSameNameGroups, getExactDuplicateGroups, getSimilarPairs, similarity
+} from '../similarity.js';
+import { formatPersonaSubline } from '../persona-data.js';
 
 export function personaImageUrl(id) {
     if (!id) return '';
@@ -23,12 +26,6 @@ export function statusBadge(persona, all) {
     if (isInGroup(persona, getSameNameGroups(all))) return '<span class="pmp18-badge">同名</span>';
     return '';
 }
-
-    getSameNameGroups, getExactDuplicateGroups, getSimilarPairs, similarity
-} from '../similarity.js';
-import { getPersonaData, formatPersonaSubline } from '../persona-data.js';
-
-/* ---------- UI lists ---------- */
 
 export function renderCard(persona, all) {
     const checked = state.selected.has(persona.id);
@@ -110,5 +107,3 @@ export function renderSimilarView(personas) {
             </div>
         </section>`).join('')}</div>`;
 }
-
-/** Multi overview cards + in-place detail vs baseline (same screen) */

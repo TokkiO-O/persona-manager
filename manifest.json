@@ -7,7 +7,7 @@
   "css": "style.css",
   "author": "xingx121",
   "version": "1.9.2",
-  "description": "Persona \u7ba1\u7406\uff08\u6a21\u5757\u5316\uff09\uff1a\u4fee\u590d power-user import \u8def\u5f84\uff0c\u5165\u53e3\u6062\u590d\u3002",
+  "description": "修复 components.js 损坏的 import 导致扩展无法加载（入口消失）。",
   "hooks": {
     "update": "onUpdate"
   }

@@ -1,14 +1,42 @@
-// power-user.js lives at /scripts/power-user.js (public/scripts/ in the
-// SillyTavern repo). Our extension sits at
-// /scripts/extensions/third-party/Persona Manager/, so from
-// src/persona-data.js we need to climb out 4 levels then down into
-// scripts/. Earlier builds used a wrong relative path and the import
-// errored, which aborted the whole module graph and prevented the entry
-// button from being injected.
-import { power_user } from '../../../../scripts/power-user.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';
+
+/** Resolve power_user without brittle relative paths (works for data/ and third-party/). */
+function getPowerUser() {
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        if (ctx?.powerUser) return ctx.powerUser;
+        if (ctx?.power_user) return ctx.power_user;
+    } catch { /* ignore */ }
+    try {
+        if (window.power_user) return window.power_user;
+    } catch { /* ignore */ }
+    return null;
+}
+
+// Proxy so existing `power_user.xxx` reads work; mutations hit the live object.
+const power_user = new Proxy({}, {
+    get(_t, prop) {
+        const pu = getPowerUser();
+        if (!pu) {
+            if (prop === 'personas' || prop === 'persona_descriptions') return {};
+            return undefined;
+        }
+        const v = pu[prop];
+        return typeof v === 'function' ? v.bind(pu) : v;
+    },
+    set(_t, prop, value) {
+        const pu = getPowerUser();
+        if (!pu) return false;
+        pu[prop] = value;
+        return true;
+    },
+    has(_t, prop) {
+        const pu = getPowerUser();
+        return pu ? prop in pu : false;
+    },
+});
 
 /* ---------- Persona read / write (id-safe) ---------- */
 

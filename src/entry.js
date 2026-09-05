@@ -64,10 +64,17 @@ export function injectFloatingEntry() {
 }
 
 export function installEntryObserver() {
-    if (window.__pmp18EntryInstalled) return;
-    window.__pmp18EntryInstalled = true;
+    // Allow re-run after hot reload; still avoid stacking timers
+    if (window.__pmp18EntryTimer) {
+        clearInterval(window.__pmp18EntryTimer);
+        window.__pmp18EntryTimer = null;
+    }
 
-    if (injectEntry()) return;
+    if (injectEntry()) {
+        // Still schedule a safety float if panel button disappears after navigation
+        setTimeout(() => { if (!document.getElementById(BUTTON_ID)) injectFloatingEntry(); }, 3000);
+        return;
+    }
 
     let ticks = 0;
     const observer = new MutationObserver(() => {
