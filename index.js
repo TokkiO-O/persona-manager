@@ -1,18 +1,18 @@
 /**
- * Persona Manager v1.8.14
+ * Persona Manager v1.8.15
  * - Mobile CSS: viewport/100dvh + tap target sizes
  * - Entry z-index/pointer-events fix (fullscreen mobile)
  * - Compare workspace stacks vertically on narrow screens
  * - Update: fallback to several install paths; clear manual instructions if all fail
  * - Mobile compare: shrink baseline/other buttons, scrollable workspace, capped share panel
- * - Mobile editor: fullscreen with flex body so textarea stays visible
+ * - Mobile editor: fullscreen flex layout so textarea stays visible
  * - Preserve scroll position across re-renders (compare page no longer jumps to top)
- */
+ * - Select checkbox: in-place DOM update (no full re-render), so scroll never resets
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.14';
+const VERSION = '1.8.15';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -977,6 +977,34 @@ function renderManagerContent(personas) {
     return renderSimilarView(personas);
 }
 
+/** In-place update of the bottom selection hint. No full re-render, so the
+ *  page never scrolls. Insert the bar if missing, remove it if no longer needed. */
+function updateSelectionHint(root) {
+    if (!root) return;
+    const windowEl = root.querySelector('.pmp18-window');
+    if (!windowEl) return;
+    let bar = windowEl.querySelector('.pmp18-selection-bar');
+    const n = state.selected.size;
+    const html = n >= 2
+        ? `<div class="pmp18-selection-bar">
+            <div><strong>已选 ${n} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
+            <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
+            <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
+           </div>`
+        : n === 1
+            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>请再选至少一个</span></div><button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
+            : '';
+    if (!html) {
+        if (bar) bar.remove();
+        return;
+    }
+    if (!bar) {
+        bar = document.createElement('div');
+        windowEl.appendChild(bar);
+    }
+    bar.outerHTML = html;
+}
+
 function renderManager() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
@@ -1326,10 +1354,40 @@ function ensureRoot() {
             return;
         }
         if (action === 'clear-search') { state.query = ''; renderManager(); return; }
-        if (action === 'clear-selection') { state.selected.clear(); renderManager(); return; }
+        if (action === 'clear-selection') {
+            state.selected.clear();
+            // In-place: uncheck all cards, remove selection hint, do not re-render
+            const root = document.getElementById(ROOT_ID);
+            if (root) {
+                root.querySelectorAll('.pmp18-card.is-selected').forEach(c => c.classList.remove('is-selected'));
+                root.querySelectorAll('input[data-action="select"]').forEach(i => { i.checked = false; });
+                updateSelectionHint(root);
+            }
+            return;
+        }
         if (action === 'select-group') {
-            for (const id of (target.dataset.ids || '').split('|').filter(Boolean)) state.selected.add(String(id));
-            renderManager();
+            const ids = (target.dataset.ids || '').split('|').filter(Boolean);
+            let allSelected = ids.length > 0 && ids.every(id => state.selected.has(String(id)));
+            for (const id of ids) {
+                const sid = String(id);
+                if (allSelected) state.selected.delete(sid);
+                else state.selected.add(sid);
+            }
+            // In-place update for current visible cards; if filter changes anything,
+            // a re-render is required (cards outside the filter are not in the DOM).
+            const root = document.getElementById(ROOT_ID);
+            if (root) {
+                for (const id of ids) {
+                    const sid = String(id);
+                    const card = root.querySelector(`.pmp18-card[data-persona-id="${CSS.escape(sid)}"]`);
+                    if (card) {
+                        card.classList.toggle('is-selected', state.selected.has(sid));
+                        const cb = card.querySelector('input[data-action="select"]');
+                        if (cb) cb.checked = state.selected.has(sid);
+                    }
+                }
+                updateSelectionHint(root);
+            }
             return;
         }
         if (action === 'compare-pair') {
@@ -1414,7 +1472,11 @@ function ensureRoot() {
             if (!id) return;
             if (input.checked) state.selected.add(id);
             else state.selected.delete(id);
-            renderManager();
+            // In-place update: avoid full re-render so scroll position is not reset
+            // on mobile, and the checkbox does not "jump" to the top of the list.
+            const card = input.closest('.pmp18-card');
+            if (card) card.classList.toggle('is-selected', input.checked);
+            updateSelectionHint(root);
             return;
         }
         if (event.target.id === 'pmp18-same-name') {

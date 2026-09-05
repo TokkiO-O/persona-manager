@@ -1,9 +1,16 @@
 # Changelog
 
+## v1.8.15
+
+- 选 persona checkbox / 清除选择 / 全选组 改为 in-place DOM 更新，不再触发 `renderManager()` 重渲染，彻底避免列表页回顶
+- 新增 `updateSelectionHint()` 函数，只替换底部 selection bar 一段 DOM
+- 1.8.14 的 scrollTop 恢复机制作为兜底保留
+
 ## v1.8.14
 
-- 保留滚动位置：所有交互（选对象/切基准/tab 切换/复选框/搜索）后不再回顶
+- 保留 `pmp18-content` / `pmp18-compare-workspace` / `pmp18-tabs` 的 scrollTop + scrollLeft，重渲染后用 rAF 恢复
 - 保留搜索框光标和焦点，跨重渲染继续输入不会丢字
+- 注：v1.8.15 进一步把复选框改成 in-place 更新，不再依赖 scroll 恢复
 
 ## v1.8.13
 
