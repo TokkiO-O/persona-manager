@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.9.3
+
+- **修复读不到 Persona**：用扩展根目录 `power-user-bridge.js` 正式 re-export `power_user`（与旧单文件相同相对路径），去掉错误的 `getContext().powerUser` Proxy
+- `power_user` 不可用时不缓存空列表
+- `diff.js` 补上缺失的 `similarity` 导入（否则对比软匹配会 ReferenceError）
+- `compare.js` 补上缺失的 `emptyState` 导入
+- 写入/删除改为 `hasPowerUser()` 判断，避免 Proxy 恒为真导致静默失败
+
+## v1.9.2
+
+- **修复入口消失**：`src/ui/components.js` 中 `import` 被插入破坏导致语法错误、整扩展无法加载
+- `power_user` 曾改为 getContext 探测（后续在 1.9.3 纠正为正式 import）
+- 入口观察器与浮动按钮兜底加强
+
+## v1.9.1
+
+- 修正 `src/` 下 `power-user` 相对路径深度（少一层 `../` 会导致模块加载失败）
+- `entry.js` 与 `render.js` 解耦，用 `setEntryOpenManager` 接线，避免循环依赖
+
 ## v1.9.0
 
 - 代码拆分为 `src/` 多模块（ESM），入口仍为 `index.js`
