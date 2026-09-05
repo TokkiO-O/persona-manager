@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xingx121",
-  "version": "1.9.3",
-  "description": "修复 power_user 读取、diff similarity 导入、compare emptyState。",
+  "version": "1.9.4",
+  "description": "更新检查多镜像回退（GitHub raw + jsDelivr）。",
   "hooks": {
     "update": "onUpdate"
   }

@@ -1,13 +1,24 @@
 /** Shared constants for Persona Manager */
 
 export const EXT = 'Persona Manager';
-export const VERSION = '1.9.3';
+export const VERSION = '1.9.4';
 export const ROOT_ID = 'pmp18-root';
 export const BUTTON_ID = 'pmp18-entry';
 export const ENTRY_MARK = 'pmp18-entry-installed';
 export const STORAGE_KEY = 'pmp18_settings';
-export const REMOTE_MANIFEST = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json';
-export const REMOTE_CHANGELOG = 'https://raw.githubusercontent.com/xingx121/persona-manager/main/CHANGELOG.md';
+export const REMOTE_MANIFEST_URLS = [
+    'https://raw.githubusercontent.com/xingx121/persona-manager/main/manifest.json',
+    'https://cdn.jsdelivr.net/gh/xingx121/persona-manager@main/manifest.json',
+    'https://fastly.jsdelivr.net/gh/xingx121/persona-manager@main/manifest.json',
+];
+export const REMOTE_CHANGELOG_URLS = [
+    'https://raw.githubusercontent.com/xingx121/persona-manager/main/CHANGELOG.md',
+    'https://cdn.jsdelivr.net/gh/xingx121/persona-manager@main/CHANGELOG.md',
+    'https://fastly.jsdelivr.net/gh/xingx121/persona-manager@main/CHANGELOG.md',
+];
+// Back-compat single URL (first mirror)
+export const REMOTE_MANIFEST = REMOTE_MANIFEST_URLS[0];
+export const REMOTE_CHANGELOG = REMOTE_CHANGELOG_URLS[0];
 
 /** Words that produce noisy "shared" matches across unrelated personas */
 export const COMMON_STOPWORDS = new Set([

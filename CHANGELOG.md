@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.9.4
+
+- 更新检查：GitHub raw 失败时自动回退 `cdn.jsdelivr.net` / `fastly.jsdelivr.net`
+- 设置页「无法连接」时显示具体错误信息
+
 ## v1.9.3
 
 - **修复读不到 Persona**：用扩展根目录 `power-user-bridge.js` 正式 re-export `power_user`（与旧单文件相同相对路径），去掉错误的 `getContext().powerUser` Proxy

@@ -67,6 +67,7 @@ export function renderSettingsPanel() {
             <div>
                 <div><b>当前版本</b> v${VERSION}</div>
                 <div class="pmp18-muted">无法连接更新源</div>
+                <div class="pmp18-muted" style="word-break:break-all;font-size:11px">${escapeHtml(String(upd.message || '网络错误；已尝试 GitHub raw + jsDelivr'))}</div>
             </div>
             <button type="button" class="pmp18-small-btn" data-action="check-update">重试</button>
         </div>`;

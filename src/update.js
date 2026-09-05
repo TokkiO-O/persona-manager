@@ -1,4 +1,4 @@
-import { EXT, VERSION, REMOTE_MANIFEST, REMOTE_CHANGELOG } from './constants.js';
+import { EXT, VERSION, REMOTE_MANIFEST_URLS, REMOTE_CHANGELOG_URLS } from './constants.js';
 import { state } from './state.js';
 import { escapeHtml } from './util.js';
 
@@ -22,6 +22,22 @@ export async function fetchText(url) {
     const r = await fetch(u, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.text();
+}
+
+/** Try multiple mirrors until one succeeds (GitHub raw often blocked). */
+export async function fetchTextFromMirrors(urls) {
+    const list = Array.isArray(urls) ? urls : [urls];
+    const errors = [];
+    for (const url of list) {
+        try {
+            const text = await fetchText(url);
+            if (text != null && String(text).length) return { text: String(text), url };
+        } catch (e) {
+            errors.push(`${url} → ${e?.message || e}`);
+            console.warn(`[${EXT}] mirror failed:`, url, e);
+        }
+    }
+    throw new Error(errors.length ? errors.join(' | ') : 'no mirrors');
 }
 
 /** ST API calls need X-CSRF-Token or ForbiddenError: Invalid CSRF token */
@@ -99,13 +115,14 @@ export async function checkForUpdates() {
     state.updateInfo = { checking: true };
     if (state.tab === 'settings') refreshUi();
     try {
-        const text = await fetchText(REMOTE_MANIFEST);
+        const { text, url: usedUrl } = await fetchTextFromMirrors(REMOTE_MANIFEST_URLS);
         const remote = JSON.parse(text);
         const rv = String(remote.version || '');
         const available = Boolean(rv && rv !== VERSION);
         let changelog = '';
         try {
-            changelog = await fetchText(REMOTE_CHANGELOG);
+            const ch = await fetchTextFromMirrors(REMOTE_CHANGELOG_URLS);
+            changelog = ch.text;
         } catch {
             changelog = remote.description || '（无法获取 CHANGELOG.md）';
         }
@@ -114,10 +131,14 @@ export async function checkForUpdates() {
             available,
             remoteVersion: rv,
             changelog,
+            source: usedUrl,
             error: false,
         };
+        console.log(`[${EXT}] update check ok via`, usedUrl, 'remote=', rv);
     } catch (e) {
-        state.updateInfo = { checked: true, available: false, error: true, message: e?.message || String(e) };
+        const msg = e?.message || String(e);
+        state.updateInfo = { checked: true, available: false, error: true, message: msg };
+        console.error(`[${EXT}] update check failed`, e);
     }
     if (state.tab === 'settings' || state.active) refreshUi();
     return state.updateInfo;
