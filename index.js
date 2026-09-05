@@ -1,22 +1,29 @@
 /**
- * Persona Manager v1.8.16
- * - Mobile CSS: viewport/100dvh + tap target sizes
- * - Entry z-index/pointer-events fix (fullscreen mobile)
- * - Compare workspace stacks vertically on narrow screens
- * - Update: fallback to several install paths; clear manual instructions if all fail
- * - Mobile compare: shrink baseline/other buttons, scrollable workspace, capped share panel
- * - Mobile editor: fullscreen flex layout so textarea stays visible
- * - Preserve scroll position across re-renders (compare page no longer jumps to top)
- * - Select checkbox: in-place DOM update (no full re-render), so scroll never resets
- * - Baseline buttons now show avatar + name + subline (so 5 同名同头像 are distinguishable)
- * - Shared snippets: dropped length-2 matches, require number+unit for measurements,
- *   blacklist common body/personal words (身高/三围/性格 etc.)
- * - Update check: per-call cache-buster on raw.githubusercontent.com URLs
+ * Persona Manager v1.8.17
+ *
+ * Module map (all in this single file because ST third-party extensions
+ * are loaded as one <script>):
+ *
+ *   §1  Constants & state
+ *   §2  Utilities (escape / normalize / load+save settings)
+ *   §3  Persona data — read, write, delete, with memo cache
+ *   §4  PERSONA_UPDATED listener (invalidate cache + re-render if open)
+ *   §5  Grouping & similarity
+ *   §6  Diff engine (splitUnits / lcs / unorderedDiff / shared snippets)
+ *   §7  UI: avatar / card / group / view renderers
+ *   §8  UI: settings panel + tab buttons
+ *   §9  UI: compare workspace (multi-compare, fragment mode, legend)
+ *   §10 UI: root manager render + scroll preservation + in-place select
+ *   §11 Editor overlay (full editor with id-lock)
+ *   §12 Update check (remote manifest + CHANGELOG, multi-path install)
+ *   §13 Entry button injection (anchored + floating fallback)
+ *   §14 Keyboard / init / onUpdate hook
+ */
 
 import { power_user } from '../../../power-user.js';
 
 const EXT = 'Persona Manager';
-const VERSION = '1.8.16';
+const VERSION = '1.8.17';
 const ROOT_ID = 'pmp18-root';
 const BUTTON_ID = 'pmp18-entry';
 const ENTRY_MARK = 'pmp18-entry-installed';
@@ -108,10 +115,30 @@ function getActiveAvatarId() {
     return '';
 }
 
+/* ---------- §3 Persona data — read / write / delete (with memo cache) ---------- */
+
+let _personaCache = null;     // { version, items }
+let _personaVersion = 0;
+
+// Bump whenever the underlying power_user data is mutated through this module,
+// or any external write that we know about (PERSONA_UPDATED / PERSONA_DELETED
+// event).
+function invalidatePersonaCache(reason) {
+    _personaCache = null;
+}
+
+/**
+ * Returns parsed persona list, with shape:
+ *   { id, name, title, description, nameKey, descriptionKey }.
+ * Memoized: re-renders don't re-parse descriptions. Invalidated by
+ * PERSONA_UPDATED / PERSONA_DELETED events and by our own writes.
+ */
 function getPersonaData() {
+    if (_personaCache) return _personaCache.items;
+
     const personas = power_user?.personas || {};
     const descriptions = power_user?.persona_descriptions || {};
-    return Object.entries(personas).map(([id, rawName]) => {
+    const items = Object.entries(personas).map(([id, rawName]) => {
         const name = String(rawName ?? id);
         const rawDesc = descriptions?.[id];
         const description = getPersonaDescription(rawDesc);
@@ -125,6 +152,8 @@ function getPersonaData() {
             descriptionKey: normalizeText(description),
         };
     });
+    _personaCache = { items, version: ++_personaVersion };
+    return items;
 }
 
 function formatPersonaSubline(persona) {
@@ -205,6 +234,7 @@ function persistPersonaDescription(targetId, description) {
 
     console.log(`[${EXT}] wrote description for id=${id} (active=${activeId || 'none'}) len=${nextText.length}`);
     savePowerUserSettings();
+    invalidatePersonaCache('persistPersonaDescription');
     emitPersonaUpdated(id);
     return true;
 }
@@ -244,6 +274,7 @@ function deletePersonaById(targetId) {
     if (state.focusOtherId === id) state.focusOtherId = state.compareIds.find(x => x !== state.baselineId) || null;
 
     savePowerUserSettings();
+    invalidatePersonaCache('deletePersonaById');
     try {
         const ctx = window.SillyTavern?.getContext?.();
         const es = ctx?.eventSource;
@@ -255,24 +286,88 @@ function deletePersonaById(targetId) {
     return true;
 }
 
-/* ---------- Grouping / similarity ---------- */
+/* ---------- §4 PERSONA_UPDATED listener ---------- */
 
-function groupBy(items, keyFn) {
-    const map = new Map();
-    for (const item of items) {
-        const key = keyFn(item);
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(item);
+let _personaListenerInstalled = false;
+
+function installPersonaListener() {
+    if (_personaListenerInstalled) return;
+    _personaListenerInstalled = true;
+    try {
+        const ctx = window.SillyTavern?.getContext?.();
+        const es = ctx?.eventSource;
+        if (!es?.on) return;
+        const types = ctx?.eventTypes || ctx?.event_types || {};
+        const updated = types.PERSONA_UPDATED || 'PERSONA_UPDATED';
+        const deleted = types.PERSONA_DELETED || 'PERSONA_DELETED';
+        es.on(updated, () => {
+            invalidatePersonaCache('event:PERSONA_UPDATED');
+            if (state.active) scheduleRender();
+        });
+        es.on(deleted, () => {
+            invalidatePersonaCache('event:PERSONA_DELETED');
+            if (state.active) scheduleRender();
+        });
+        console.log(`[${EXT}] persona event listener attached`);
+    } catch (e) {
+        console.warn(`[${EXT}] could not attach persona event listener`, e);
     }
-    return [...map.values()];
+}
+
+/* ---------- §5 Grouping & similarity (with module-level memo) ---------- */
+
+// These are cheap when personas count is small, but we still memo per persona
+// list identity so back-to-back renders during a click storm don't re-group.
+let _groupMemo = null; // { sig, sameName, duplicates, similar }
+
+function _personaSig(personas) {
+    // Cheap content signature: id|descriptionLen|nameLen per entry. If any
+    // persona changes, signature changes, memo is invalidated.
+    let s = '';
+    for (const p of personas) s += `${p.id}|${p.description.length}|${p.name.length};`;
+    return s;
 }
 
 function getSameNameGroups(personas) {
-    return groupBy(personas, p => p.nameKey).filter(g => g.length > 1);
+    if (_groupMemo && _groupMemo.sig === _personaSig(personas)) return _groupMemo.sameName;
+    const groups = groupBy(personas, p => p.nameKey).filter(g => g.length > 1);
+    if (!_groupMemo) _groupMemo = { sig: '', sameName: [], duplicates: [], similar: [] };
+    _groupMemo.sig = _personaSig(personas);
+    _groupMemo.sameName = groups;
+    return groups;
 }
 
 function getExactDuplicateGroups(personas) {
-    return groupBy(personas, p => `${p.nameKey}\u0000${p.descriptionKey}`).filter(g => g.length > 1);
+    if (_groupMemo && _groupMemo.sig === _personaSig(personas)) return _groupMemo.duplicates;
+    const groups = groupBy(personas, p => `${p.nameKey}\u0000${p.descriptionKey}`).filter(g => g.length > 1);
+    if (!_groupMemo) _groupMemo = { sig: '', sameName: [], duplicates: [], similar: [] };
+    _groupMemo.sig = _personaSig(personas);
+    _groupMemo.duplicates = groups;
+    return groups;
+}
+
+function getSimilarPairs(personas, threshold = state.settings.similarityThreshold) {
+    const allowSameName = state.settings.includeSameNameInSimilar;
+    const sig = `${_personaSig(personas)}|t=${threshold}|a=${allowSameName ? 1 : 0}`;
+    if (_groupMemo && _groupMemo.similarSig === sig) return _groupMemo.similar;
+
+    const pairs = [];
+    for (let i = 0; i < personas.length; i++) {
+        for (let j = i + 1; j < personas.length; j++) {
+            const a = personas[i];
+            const b = personas[j];
+            if (!allowSameName && a.nameKey === b.nameKey) continue;
+            if (!a.descriptionKey || !b.descriptionKey) continue;
+            if (a.descriptionKey === b.descriptionKey && a.nameKey === b.nameKey) continue;
+            const score = similarity(a.description, b.description);
+            if (score >= threshold) pairs.push({ a, b, score });
+        }
+    }
+    pairs.sort((x, y) => y.score - x.score);
+    if (!_groupMemo) _groupMemo = { sig: '', sameName: [], duplicates: [], similar: [] };
+    _groupMemo.similar = pairs;
+    _groupMemo.similarSig = sig;
+    return pairs;
 }
 
 function bigrams(text) {
@@ -295,23 +390,6 @@ function similarity(a, b) {
     for (const gram of ax) if (by.has(gram)) intersection++;
     const union = ax.size + by.size - intersection;
     return union ? intersection / union : 0;
-}
-
-function getSimilarPairs(personas, threshold = state.settings.similarityThreshold) {
-    const pairs = [];
-    const allowSameName = state.settings.includeSameNameInSimilar;
-    for (let i = 0; i < personas.length; i++) {
-        for (let j = i + 1; j < personas.length; j++) {
-            const a = personas[i];
-            const b = personas[j];
-            if (!allowSameName && a.nameKey === b.nameKey) continue;
-            if (!a.descriptionKey || !b.descriptionKey) continue;
-            if (a.descriptionKey === b.descriptionKey && a.nameKey === b.nameKey) continue;
-            const score = similarity(a.description, b.description);
-            if (score >= threshold) pairs.push({ a, b, score });
-        }
-    }
-    return pairs.sort((x, y) => y.score - x.score);
 }
 
 function personaImageUrl(id) {
@@ -1041,6 +1119,19 @@ function updateSelectionHint(root) {
     bar.outerHTML = html;
 }
 
+// rAF-coalesced render: many events in the same frame collapse to one render.
+// Critical for native persona dropdown opening (PERSONA_UPDATED may fire a
+// burst of events when ST refreshes its UI).
+let _renderScheduled = false;
+function scheduleRender() {
+    if (_renderScheduled) return;
+    _renderScheduled = true;
+    requestAnimationFrame(() => {
+        _renderScheduled = false;
+        renderManager();
+    });
+}
+
 function renderManager() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
@@ -1680,6 +1771,7 @@ async function init() {
     ensureRoot();
     installKeyboardHandler();
     installEntryObserver();
+    installPersonaListener();
     console.log(`[${EXT}] v${VERSION} loaded`);
 }
 

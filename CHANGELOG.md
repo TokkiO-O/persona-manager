@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.8.17
+
+- **性能：人设数据加缓存**：新增 `_personaCache`，避免每次 render 重新解析所有 persona 的 description / title / normalize
+- **性能：分组/相似度加 memo**：`_groupMemo` 缓存 same-name / duplicate / similar 三种分组结果，相同 personas 列表直接返回
+- **性能：render 节流**：`scheduleRender()` 用 rAF 合并同一帧的多次 render，原生 persona 切换时 PERSONA_UPDATED 事件爆发不再卡顿
+- **PERSONA_UPDATED / PERSONA_DELETED 事件监听**：酒馆原生切换 persona / 删除 persona 时，自动 invalidate 缓存并重渲染（如果管理器开着）
+- **入口按钮修复**：把 `.pmp18-entry` 的 `position: relative` 改成 `isolation: isolate`，避免在某些 flex/overflow 父级里被裁切消失
+- **基准按钮宽度限制**：`.pmp18-base-btn-meta` 加 `max-width: 140px` + 强名 ellipsis，5+ 个同名同头像的基准按钮不再无限拉宽挤掉 baseline bar
+- **代码结构整理**：顶部加 §1-§14 模块注释，原 1697 行单文件按功能分段（数据/事件/分组/diff/UI/编辑器/更新/入口/键盘/init），便于后续维护
+
 ## v1.8.16
 
 - 基准按钮加 avatar + 名字 + 副标题：5 个同名同头像无备注的人设也能区分
