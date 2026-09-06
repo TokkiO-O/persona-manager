@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.22",
-  "description": "修复对比模式无法滚动：对比区包进可滚动 content。",
+  "version": "1.9.24",
+  "description": "顶区可折叠；差异去空壳；窄屏默认上下；未选摘要。",
   "hooks": {
     "update": "onUpdate"
   }

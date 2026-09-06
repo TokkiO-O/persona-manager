@@ -375,6 +375,8 @@ export function ensureRoot() {
             state.baselineId = String(target.dataset.a);
             state.focusOtherId = String(target.dataset.b);
             state.selected.clear();
+            state.showToc = false;
+            state.compareChromeOpen = false;
             renderManager();
             return;
         }
@@ -383,8 +385,10 @@ export function ensureRoot() {
             if (ids.length < 2) return;
             state.compareIds = ids;
             state.baselineId = ids[0];
-            state.focusOtherId = null; // 多选进入后先不选对象，由用户点卡片
+            state.focusOtherId = null;
             state.selected.clear();
+            state.showToc = false;
+            state.compareChromeOpen = false;
             renderManager();
             return;
         }
@@ -412,6 +416,11 @@ export function ensureRoot() {
         }
         if (action === 'set-view-mode') {
             state.viewMode = target.dataset.mode === 'stacked' ? 'stacked' : 'side';
+            renderManager();
+            return;
+        }
+        if (action === 'toggle-compare-chrome') {
+            state.compareChromeOpen = !state.compareChromeOpen;
             renderManager();
             return;
         }

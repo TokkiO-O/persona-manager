@@ -367,46 +367,73 @@ export function renderFragmentCompare(baseText, otherText, opts = {}) {
 /** Symmetric blocks: side 'base' | 'other' */
 export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts = {}) {
     const { shortMode = false } = opts;
-    // Short mode: split by sentence so we can match sentence ↔ sentence
     const aText = shortMode ? splitSentences(baseText).join('\n') : baseText;
     const bText = shortMode ? splitSentences(otherText).join('\n') : otherText;
     const rows = unorderedDiff(aText, bText);
     const parts = [];
-    let pendingSame = 0;        // count consecutive `same` (pure) blocks
+    let gapOnlyOther = 0; // 对方有、本侧无 → 累计，不逐行刷空壳
+    let gapOnlyBase = 0;
+
+    const flushGaps = () => {
+        if (side === 'base' && gapOnlyOther > 0) {
+            parts.push(`<div class="pmp18-gap-hint" title="这些内容在对方栏查看">… 对方另有 ${gapOnlyOther} 段独有内容</div>`);
+            gapOnlyOther = 0;
+        }
+        if (side === 'other' && gapOnlyBase > 0) {
+            parts.push(`<div class="pmp18-gap-hint" title="这些内容在基准栏查看">… 基准另有 ${gapOnlyBase} 段独有内容</div>`);
+            gapOnlyBase = 0;
+        }
+    };
+
     for (const row of rows) {
+        const textA = String(row.a || '').trim();
+        const textB = String(row.b || '').trim();
+        // 跳过空单元，避免「对方有 · 基准无」空壳
+        if (row.type === 'remove' && !textA) continue;
+        if (row.type === 'add' && !textB) continue;
+        if (row.type === 'same' && !textA && !textB) continue;
+        if (row.type === 'replace' && !textA && !textB) continue;
+
         const isPureSame = row.type === 'same' && (row.a === row.b || normalizeText(row.a) === normalizeText(row.b));
         if (showDiffOnly && isPureSame) continue;
-        const lineCount = String(row.a || row.b || '').split('\n').length;
 
         if (row.type === 'same') {
+            flushGaps();
             if (isPureSame) {
-                pendingSame += 1;
+                const lineCount = String(side === 'base' ? row.a : row.b).split('\n').length;
                 parts.push(`<div class="pmp18-col-block same" data-pmp18-same-lines="${lineCount}">${escapeHtml(side === 'base' ? row.a : row.b)}</div>`);
             } else {
-                pendingSame = 0;
                 const { left, right } = inlineDiffHtml(row.a, row.b);
                 parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
             }
-        } else {
-            pendingSame = 0;
-            if (row.type === 'remove') {
-                if (side === 'base') {
-                    parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
-                } else {
-                    parts.push(`<div class="pmp18-col-block remove pmp18-ghost"><span class="pmp18-tag">基准有 · 对方无</span></div>`);
-                }
-            } else if (row.type === 'add') {
-                if (side === 'other') {
-                    parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
-                } else {
-                    parts.push(`<div class="pmp18-col-block add pmp18-ghost"><span class="pmp18-tag">对方有 · 基准无</span></div>`);
-                }
-            } else {
-                const { left, right } = inlineDiffHtml(row.a, row.b);
-                parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
-            }
+            continue;
         }
+
+        if (row.type === 'remove') {
+            if (side === 'base') {
+                flushGaps();
+                parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
+            } else {
+                gapOnlyBase += 1; // 不画空壳
+            }
+            continue;
+        }
+
+        if (row.type === 'add') {
+            if (side === 'other') {
+                flushGaps();
+                parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
+            } else {
+                gapOnlyOther += 1;
+            }
+            continue;
+        }
+
+        flushGaps();
+        const { left, right } = inlineDiffHtml(row.a || '', row.b || '');
+        parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
     }
+    flushGaps();
     return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无内容</div>';
 }
 

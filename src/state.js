@@ -22,9 +22,10 @@ export const state = {
     settings: loadSettings(),
     updateInfo: null,
     // v1.9.15: compare view UI state (not persisted, session-only)
-    viewMode: 'side',      // 'stacked' | 'side' — mobile/desktop default 左右
-    showToc: false,        // diff table-of-contents drawer
-    tocQuery: '',          // search within diff
+    viewMode: 'stacked',   // 'stacked' | 'side' — 手机默认上下；宽屏可左右
+    showToc: false,
+    tocQuery: '',
+    compareChromeOpen: false, // 移动端对比顶区是否展开
 };
 
 export function saveSettingsLocal() {

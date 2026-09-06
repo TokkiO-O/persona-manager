@@ -1533,27 +1533,29 @@ mark.pmp18-share {
 
 
 
-/* ===== Multi-compare body (desktop + mobile) ===== */
+
+/* ===== Multi-compare: 左右(side) vs 上下(stacked) 必须可见不同 ===== */
+
+/* Default = 左右：基准左固定，对象横滑 */
 .pmp18-multi-body {
     display: flex;
     flex-direction: row;
-    flex: 1 1 auto;
-    min-height: 180px;
+    align-items: stretch;
     gap: 10px;
     padding: 8px 12px 16px;
-    overflow: hidden;
+    min-height: 200px;
 }
 .pmp18-multi-base-fixed {
     flex: 0 0 min(36%, 320px);
     max-width: 360px;
-    min-width: 180px;
+    min-width: 160px;
     display: flex;
     flex-direction: column;
-    min-height: 0;
     border: 1px solid rgba(255,138,98,.28);
     border-radius: 12px;
     background: rgba(255,138,98,.04);
     overflow: hidden;
+    min-height: 0;
 }
 .pmp18-multi-base-head,
 .pmp18-multi-other-head {
@@ -1618,152 +1620,33 @@ mark.pmp18-share {
     word-break: break-word;
     font-size: 13px;
     line-height: 1.55;
-    opacity: .92;
 }
 
-/* desktop stacked */
+/* 上下：基准在上，对象在下（仍可横滑多对象卡） */
 .pmp18-compare-workspace.is-stacked .pmp18-multi-body {
     flex-direction: column;
+    align-items: stretch;
 }
 .pmp18-compare-workspace.is-stacked .pmp18-multi-base-fixed {
-    flex: 0 0 40%;
-    max-width: none;
+    flex: 0 0 auto;
     width: 100%;
+    max-width: none;
+    min-width: 0;
+    max-height: 42vh;
 }
 .pmp18-compare-workspace.is-stacked .pmp18-multi-others-scroll {
     flex: 1 1 auto;
+    width: 100%;
+    min-height: 180px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+.pmp18-compare-workspace.is-stacked .pmp18-multi-other-card {
+    height: 100%;
     min-height: 160px;
 }
 
-/*
- * Mobile: from-scratch layout
- * - Workspace grows with content; .pmp18-content is the only vertical scroller
- * - Body is a vertical stack: base, then every object card full-width
- * - No nested height locks, no horizontal rail that clips cards
- */
-@media (max-width: 900px) {
-    .pmp18-compare-workspace {
-        flex: none !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-        min-height: 0 !important;
-    }
-    .pmp18-compare-topbar {
-        position: sticky;
-        top: 0;
-        z-index: 6;
-        flex-wrap: wrap;
-        gap: 6px;
-        padding: 8px 10px;
-    }
-    .pmp18-sticky-wrap {
-        position: sticky;
-        top: 48px;
-        z-index: 5;
-    }
-    .pmp18-baseline-strip,
-    .pmp18-objects-strip {
-        padding: 6px 10px;
-        min-height: 0;
-    }
-    .pmp18-share-panel {
-        margin: 6px 10px;
-        max-height: 96px;
-        overflow-y: auto;
-    }
-    .pmp18-detail-meta {
-        padding: 6px 10px;
-        font-size: 12px;
-    }
-
-    .pmp18-multi-body {
-        display: flex !important;
-        flex-direction: column !important;
-        flex: none !important;
-        height: auto !important;
-        max-height: none !important;
-        min-height: 0 !important;
-        overflow: visible !important;
-        padding: 8px 10px 32px !important;
-        gap: 12px !important;
-    }
-    .pmp18-multi-base-fixed {
-        flex: none !important;
-        width: 100% !important;
-        max-width: none !important;
-        min-width: 0 !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-    }
-    .pmp18-multi-base-body,
-    .pmp18-multi-other-body {
-        flex: none !important;
-        overflow: visible !important;
-        max-height: none !important;
-        min-height: 0 !important;
-    }
-    .pmp18-multi-others-scroll {
-        display: flex !important;
-        flex-direction: column !important;
-        flex: none !important;
-        width: 100% !important;
-        height: auto !important;
-        max-height: none !important;
-        min-height: 0 !important;
-        overflow: visible !important;
-        gap: 12px !important;
-        padding: 0 !important;
-        scroll-snap-type: none !important;
-    }
-    .pmp18-multi-other-card {
-        flex: none !important;
-        width: 100% !important;
-        max-width: none !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-    }
-
-    /* 左右 / 上下在手机上都是纵向堆叠全文，保证能滑完；开关仍可用但不锁高度 */
-    .pmp18-compare-workspace.is-side .pmp18-multi-body,
-    .pmp18-compare-workspace.is-stacked .pmp18-multi-body {
-        flex-direction: column !important;
-        overflow: visible !important;
-        height: auto !important;
-    }
-    .pmp18-compare-workspace.is-side .pmp18-multi-base-fixed,
-    .pmp18-compare-workspace.is-stacked .pmp18-multi-base-fixed {
-        width: 100% !important;
-        max-height: none !important;
-        flex: none !important;
-    }
-    .pmp18-compare-workspace.is-side .pmp18-multi-others-scroll,
-    .pmp18-compare-workspace.is-stacked .pmp18-multi-others-scroll {
-        flex-direction: column !important;
-        overflow: visible !important;
-        max-height: none !important;
-    }
-
-    /* kill legacy focus-wrap locks if any residual */
-    .pmp18-focus-wrap {
-        flex: none !important;
-        height: auto !important;
-        overflow: visible !important;
-        flex-direction: column !important;
-    }
-    .pmp18-focus-wrap .pmp18-hcol-body {
-        max-height: none !important;
-        overflow: visible !important;
-    }
-}
-
-
-/* ===== ROOT CAUSE FIX: compare must live inside a scrollport =====
-   Window is overflow:hidden + fixed height. If compare-workspace is a direct
-   child with height:auto + overflow:visible, excess content is CLIPPED with
-   no way to scroll. Always put compare in .pmp18-content--compare. */
+/* 左右：在可滚动 content 内给对比正文一个视口高度，列内自滚 */
 .pmp18-content--compare {
     flex: 1 1 auto;
     min-height: 0;
@@ -1771,53 +1654,55 @@ mark.pmp18-share {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
-    padding: 0 0 28px;
-    touch-action: pan-y;
+    padding: 0 0 24px;
 }
 .pmp18-content--compare .pmp18-compare-workspace {
     display: flex;
     flex-direction: column;
+    min-height: 100%;
+}
+.pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-body {
+    flex: 1 1 auto;
+    min-height: min(60vh, 520px);
+    max-height: min(70vh, 640px);
+    overflow: hidden;
+}
+.pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-body {
     flex: none;
     height: auto;
-    min-height: 0;
     max-height: none;
     overflow: visible;
 }
-.pmp18-content--compare .pmp18-multi-body {
+.pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-base-fixed {
+    max-height: none;
+    overflow: visible;
+}
+.pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-base-body,
+.pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-other-body {
+    overflow: visible;
+    flex: none;
+}
+.pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-others-scroll {
     flex: none;
     height: auto;
-    max-height: none;
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: visible;
 }
-.pmp18-content--compare .pmp18-multi-base-fixed,
-.pmp18-content--compare .pmp18-multi-other-card {
-    height: auto;
-    max-height: none;
-    overflow: visible;
-}
-.pmp18-content--compare .pmp18-multi-base-body,
-.pmp18-content--compare .pmp18-multi-other-body {
-    flex: none;
-    overflow: visible;
-    max-height: none;
-}
-.pmp18-content--compare .pmp18-multi-others-scroll {
-    flex: none;
+.pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-other-card {
     height: auto;
     max-height: none;
     overflow: visible;
 }
 
+/* Mobile: 两种模式必须不一样，且都能看完 */
 @media (max-width: 900px) {
     .pmp18-content--compare {
         flex: 1 1 auto !important;
         min-height: 0 !important;
         overflow-y: auto !important;
-        overflow-x: hidden !important;
         -webkit-overflow-scrolling: touch !important;
-        padding-bottom: 40px;
+        padding-bottom: 36px;
     }
-    /* sticky bars stick within the content scrollport */
     .pmp18-content--compare .pmp18-compare-topbar {
         position: sticky;
         top: 0;
@@ -1828,4 +1713,187 @@ mark.pmp18-share {
         top: 0;
         z-index: 5;
     }
+
+    /* —— 左右：基准 | 对象 并排；对象区可横滑；列内纵向滚 —— */
+    .pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-body {
+        flex-direction: row !important;
+        flex: none !important;
+        height: 55vh !important;
+        max-height: 55vh !important;
+        min-height: 240px !important;
+        overflow: hidden !important;
+        padding: 8px 10px !important;
+        gap: 8px !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-base-fixed {
+        flex: 0 0 46% !important;
+        width: 46% !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        overflow: hidden !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-base-body {
+        flex: 1 1 auto !important;
+        overflow-y: auto !important;
+        max-height: none !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-others-scroll {
+        flex: 1 1 auto !important;
+        flex-direction: row !important;
+        width: auto !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        gap: 8px !important;
+        padding: 0 !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-other-card {
+        flex: 0 0 88% !important;
+        width: 88% !important;
+        max-width: none !important;
+        height: 100% !important;
+        overflow: hidden !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-side .pmp18-multi-other-body {
+        flex: 1 1 auto !important;
+        overflow-y: auto !important;
+        max-height: none !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* —— 上下：全文纵向堆叠，整页滚动看完 —— */
+    .pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-body {
+        flex-direction: column !important;
+        flex: none !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        padding: 8px 10px 24px !important;
+        gap: 12px !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-base-fixed {
+        flex: none !important;
+        width: 100% !important;
+        max-width: none !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-base-body,
+    .pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-other-body {
+        flex: none !important;
+        overflow: visible !important;
+        max-height: none !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-others-scroll {
+        display: flex !important;
+        flex-direction: column !important;
+        flex: none !important;
+        width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+        gap: 12px !important;
+        padding: 0 !important;
+    }
+    .pmp18-content--compare .pmp18-compare-workspace.is-stacked .pmp18-multi-other-card {
+        flex: none !important;
+        width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+}
+
+
+/* ===== v1.9.24 chrome collapse / gap hints / summary ===== */
+.pmp18-gap-hint {
+    margin: 6px 0;
+    padding: 6px 10px;
+    font-size: 11px;
+    opacity: .55;
+    border-left: 3px solid rgba(127,127,127,.25);
+    background: rgba(127,127,127,.06);
+    border-radius: 0 8px 8px 0;
+}
+.pmp18-card-summary {
+    padding: 8px 4px 4px;
+    font-size: 12px;
+    line-height: 1.5;
+    opacity: .75;
+}
+.pmp18-card-summary-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #4a6cf7;
+    opacity: .9;
+}
+.pmp18-compare-compact {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(0,0,0,.07);
+    background: var(--SmartThemeBlurTintColor, #fff);
+    position: sticky;
+    top: 0;
+    z-index: 7;
+}
+.pmp18-compact-pair {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 6px;
+    font-size: 13px;
+}
+.pmp18-compact-pair strong {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 42vw;
+}
+.pmp18-compact-sub {
+    font-size: 10px;
+    opacity: .55;
+    max-width: 30vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pmp18-compare-chrome { display: block; }
+
+@media (max-width: 900px) {
+    .pmp18-compare-workspace.is-narrow .pmp18-compare-compact {
+        display: flex;
+    }
+    .pmp18-compare-workspace.is-narrow.is-chrome-collapsed .pmp18-compare-chrome {
+        display: none;
+    }
+    .pmp18-compare-workspace.is-narrow.is-chrome-open .pmp18-compare-chrome {
+        display: block;
+    }
+    /* 窄屏对比不显示 TOC 浮层按钮占位干扰时：面板仍可用详情展开后的列表按钮 */
+    .pmp18-compare-workspace.is-narrow .pmp18-toc-panel {
+        width: min(100%, 100vw);
+        max-width: 100%;
+    }
+}
+
+/* 芯片副标题稍清晰 */
+.pmp18-base-card-meta small,
+.pmp18-obj-card-meta small {
+    opacity: .72;
+    font-weight: 500;
+}
+.pmp18-base-card.is-active,
+.pmp18-obj-card.is-active {
+    outline: 2px solid rgba(255,138,98,.55);
 }

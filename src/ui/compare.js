@@ -125,8 +125,10 @@ export function renderCompareWorkspace(personas) {
                 bodyHtml = renderFocusBlocks(base.description, p.description, 'other', showDiffOnly, { shortMode: sm });
             }
         } else {
-            // 未选中：不标颜色
-            bodyHtml = `<div class="pmp18-col-block plain">${escapeHtml(p.description).replace(/\n/g, '<br>')}</div>`;
+            // 未选中：只显示摘要，点选后再展开全文对比
+            const raw = String(p.description || '').replace(/\s+/g, ' ').trim();
+            const preview = raw.slice(0, 96);
+            bodyHtml = `<div class="pmp18-card-summary">${escapeHtml(preview)}${raw.length > 96 ? '…' : ''}<div class="pmp18-card-summary-hint">点击展开与基准对比</div></div>`;
         }
         return `
             <article class="pmp18-multi-other-card ${isFocus ? 'is-focus' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}" data-dblaction="edit-full" data-id2="${escapeHtml(id)}">
@@ -144,54 +146,58 @@ export function renderCompareWorkspace(personas) {
             </article>`;
     }).join('');
 
-    const viewMode = state.viewMode === 'stacked' ? 'stacked' : 'side';
+    const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900;
+    // 窄屏强制上下全文；宽屏才允许左右
+    const viewMode = (!isNarrow && state.viewMode === 'side') ? 'side' : 'stacked';
     const viewModeClass = `is-${viewMode}`;
+    const chromeOpen = isNarrow ? !!state.compareChromeOpen : true;
+    const pairLabel = focusPersona
+        ? `${base.name} ↔ ${focusPersona.name}`
+        : `${base.name} · 待选对象`;
 
     return `
-        <div class="pmp18-compare-workspace ${viewModeClass}">
-            <div class="pmp18-compare-topbar">
-                <button type="button" class="pmp18-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i> 返回</button>
-                <div class="pmp18-compare-title">
-                    <strong>对比</strong>
-                    <span>基准固定 · 对象全文左右滑 · 点选高亮对比 · 双击编辑</span>
-                </div>
-                <div class="pmp18-compare-tools">
-                    <button type="button" class="pmp18-small-btn ${state.showToc ? 'is-on' : ''}" data-action="toggle-toc" title="目录与搜索"><i class="fa-solid fa-list"></i></button>
-                    ${fragmentMode && focusPersona ? '' : `<button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>`}
-                    <button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${viewMode === 'side' ? '↕ 上下' : '↔ 左右'}</button>
-                    <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}">编辑基准</button>
-                    ${focusPersona ? `<button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(focusPersona.id)}">编辑对方</button>` : ''}
-                </div>
-            </div>
-
-            <div class="pmp18-sticky-wrap">
-                <div class="pmp18-baseline-strip">
-                    <span class="pmp18-strip-label">基准</span>
-                    <div class="pmp18-baseline-scroll">${baselineCards}</div>
-                </div>
-                <div class="pmp18-objects-strip">
-                    <span class="pmp18-strip-label">对象</span>
-                    <div class="pmp18-objects-scroll">${objectCards}</div>
-                </div>
-            </div>
-
-            ${renderCompareLegend(fragmentMode && !!focusPersona, shortMode)}
-
-            ${sharePanel}
-
-            <div class="pmp18-detail-meta">
-                <div class="pmp18-detail-pair">
-                    <span class="pmp18-muted">基准</span>
+        <div class="pmp18-compare-workspace ${viewModeClass} ${isNarrow ? 'is-narrow' : ''} ${chromeOpen ? 'is-chrome-open' : 'is-chrome-collapsed'}">
+            <div class="pmp18-compare-compact">
+                <button type="button" class="pmp18-back-btn" data-action="exit-compare"><i class="fa-solid fa-arrow-left"></i></button>
+                <div class="pmp18-compact-pair" title="${escapeHtml(pairLabel)}">
                     <strong>${escapeHtml(base.name)}</strong>
-                    <span class="pmp18-muted">${escapeHtml(formatPersonaSubline(base))}</span>
+                    <span class="pmp18-compact-sub">${escapeHtml(formatPersonaSubline(base))}</span>
+                    ${focusPersona ? `<span class="pmp18-detail-vs">↔</span><strong>${escapeHtml(focusPersona.name)}</strong><span class="pmp18-compact-sub">${escapeHtml(formatPersonaSubline(focusPersona))}</span>` : `<span class="pmp18-muted">· 点选对象</span>`}
                 </div>
-                ${focusPersona ? `<span class="pmp18-detail-vs">↔</span>
-                <div class="pmp18-detail-pair">
-                    <span class="pmp18-muted">对方</span>
-                    <strong>${escapeHtml(focusPersona.name)}</strong>
-                    <span class="pmp18-muted">${escapeHtml(formatPersonaSubline(focusPersona))}</span>
-                </div>` : ''}
-                <span class="pmp18-detail-score">${metaLine}</span>
+                <button type="button" class="pmp18-small-btn ${chromeOpen ? 'is-on' : ''}" data-action="toggle-compare-chrome" title="展开/收起工具区">${chromeOpen ? '收起' : '详情'}</button>
+            </div>
+
+            <div class="pmp18-compare-chrome">
+                <div class="pmp18-compare-topbar">
+                    <div class="pmp18-compare-title">
+                        <strong>对比</strong>
+                        <span>${isNarrow ? '上下全文 · 点选对象高亮' : '基准固定 · 可切换左右/上下'}</span>
+                    </div>
+                    <div class="pmp18-compare-tools">
+                        <button type="button" class="pmp18-small-btn ${state.showToc ? 'is-on' : ''}" data-action="toggle-toc" title="目录与搜索"><i class="fa-solid fa-list"></i></button>
+                        ${fragmentMode && focusPersona ? '' : `<button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>`}
+                        ${isNarrow ? '' : `<button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${viewMode === 'side' ? '↕ 上下' : '↔ 左右'}</button>`}
+                        <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}">编辑基准</button>
+                        ${focusPersona ? `<button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(focusPersona.id)}">编辑对方</button>` : ''}
+                    </div>
+                </div>
+
+                <div class="pmp18-sticky-wrap">
+                    <div class="pmp18-baseline-strip">
+                        <span class="pmp18-strip-label">基准</span>
+                        <div class="pmp18-baseline-scroll">${baselineCards}</div>
+                    </div>
+                    <div class="pmp18-objects-strip">
+                        <span class="pmp18-strip-label">对象</span>
+                        <div class="pmp18-objects-scroll">${objectCards}</div>
+                    </div>
+                </div>
+
+                ${renderCompareLegend(fragmentMode && !!focusPersona, shortMode)}
+                ${sharePanel}
+                <div class="pmp18-detail-meta">
+                    <span class="pmp18-detail-score">${metaLine}</span>
+                </div>
             </div>
 
             <div class="pmp18-multi-body ${mode}">
