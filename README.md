@@ -36,7 +36,7 @@ curl -L -o persona-manager.zip \
 # 2. 解压到酒馆第三方扩展目录
 unzip persona-manager.zip
 mv persona-manager-main \
-   <SillyTavern>/data/default-user/extensions/third-party/Persona\ Manager
+   <SillyTavern>/data/default-user/extensions/third-party/Persona-Manager
 
 # 3. 刷新酒馆页面
 ```
