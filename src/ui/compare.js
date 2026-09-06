@@ -112,7 +112,12 @@ export function renderCompareWorkspace(personas) {
                 <div class="pmp18-baseline-scroll">${baselineCards}</div>
             </div>
 
-            ${detailMeta}
+            <div class="pmp18-objects-strip">
+                <span class="pmp18-strip-label">对象</span>
+                <div class="pmp18-objects-scroll">${objectCards}</div>
+            </div>
+
+            ${fragmentMode ? frag.sharePanel : ''}
 
             <div class="pmp18-focus-wrap ${mode}">
                 <section class="pmp18-hcol pmp18-hcol-base">
@@ -141,13 +146,7 @@ export function renderCompareWorkspace(personas) {
                 </section>
             </div>
 
-            <div class="pmp18-objects-strip">
-                <span class="pmp18-strip-label">对象</span>
-                <div class="pmp18-objects-scroll">${objectCards}</div>
-            </div>
-
             ${renderCompareLegend(fragmentMode, shortMode)}
-            ${fragmentMode ? frag.sharePanel : ''}
 
             ${renderTocPanel(fragmentMode, shortMode, base.description, other.description)}
         </div>`;
