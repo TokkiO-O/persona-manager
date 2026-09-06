@@ -296,6 +296,9 @@ body.pmp18-open { overflow: hidden !important; }
     display: flex;
     flex-direction: column;
     position: relative;
+    /* v1.9.18: height the sticky header stack occupies below the topbar.
+       baseline(~52) + objects(~88) on desktop; overridden on mobile. */
+    --pmp18-sticky-h: 140px;
 }
 .pmp18-compare-topbar {
     display: flex;
@@ -315,7 +318,15 @@ body.pmp18-open { overflow: hidden !important; }
 .pmp18-compare-title span { font-size: 11px; opacity: .55; margin-top: 2px; }
 .pmp18-compare-tools { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* ===== v1.9.15 baseline strip (sticky) ===== */
+/* ===== v1.9.18 sticky-wrap: baseline + objects move together ===== */
+.pmp18-sticky-wrap {
+    position: sticky;
+    top: 53px;  /* below the topbar */
+    z-index: 4;
+    flex: 0 0 auto;
+    background: var(--SmartThemeBlurTintColor, #fff);
+    backdrop-filter: blur(8px);
+}
 .pmp18-baseline-strip {
     display: flex;
     align-items: center;
@@ -323,11 +334,6 @@ body.pmp18-open { overflow: hidden !important; }
     padding: 8px 20px;
     border-bottom: 1px solid rgba(0,0,0,.06);
     flex: 0 0 auto;
-    position: sticky;
-    top: 53px;  /* below the topbar */
-    z-index: 4;
-    background: var(--SmartThemeBlurTintColor, #fff);
-    backdrop-filter: blur(8px);
 }
 .pmp18-objects-strip {
     display: flex;
@@ -336,11 +342,6 @@ body.pmp18-open { overflow: hidden !important; }
     padding: 8px 20px;
     border-bottom: 1px solid rgba(0,0,0,.06);
     flex: 0 0 auto;
-    position: sticky;
-    top: 101px;  /* topbar 53 + baseline-strip ~48 */
-    z-index: 4;
-    background: var(--SmartThemeBlurTintColor, #fff);
-    backdrop-filter: blur(8px);
     min-height: 76px;
 }
 .pmp18-strip-label { font-size: 12px; opacity: .6; flex: 0 0 auto; font-weight: 600; }
@@ -580,7 +581,7 @@ mark.pmp18-search-hit {
        scrolling inside the (stacked or side-by-side) focus area. Sits below
        the sticky stack (topbar 53 + baseline + objects). */
     position: sticky;
-    top: 150px;
+    top: calc(53px + var(--pmp18-sticky-h));
     z-index: 3;
 }
 .pmp18-hcol-body {
@@ -1392,7 +1393,11 @@ mark.pmp18-share {
 /* ===== v1.9.15 mobile compare layout ===== */
 @media (max-width: 900px) {
     .pmp18-compare-workspace {
-        /* Allow flex children to scroll independently */
+        /* v1.9.18: let the workspace grow to its natural (content) height so
+           the outer .pmp18-content scrolls and the other column is reachable
+           by swiping down in stacked mode. */
+        flex: none;
+        min-height: 0;
         overflow: visible;
     }
     .pmp18-compare-topbar {
@@ -1403,20 +1408,20 @@ mark.pmp18-share {
     .pmp18-compare-tools { gap: 4px; }
     .pmp18-compare-tools .pmp18-small-btn { padding: 5px 8px; font-size: 11px; }
 
+    .pmp18-sticky-wrap {
+        top: 49px;
+    }
     .pmp18-baseline-strip {
         padding: 6px 12px;
-        top: 49px;
     }
     .pmp18-base-card { min-width: 0; padding: 3px 8px 3px 3px; }
     .pmp18-base-card .pmp18-avatar { width: 22px; height: 22px; flex: 0 0 22px; }
     .pmp18-base-card-meta small { display: none; }
 
-    /* v1.9.17: object strip sticky too, stacking right under the baseline
-       strip. top = topbar(49) + baseline strip height. */
+    /* v1.9.18: object strip inherits sticky from the wrap */
     .pmp18-objects-strip {
         padding: 6px 12px;
         gap: 6px;
-        top: 85px;  /* 49 + baseline ~36 */
         min-height: 64px;
     }
     .pmp18-obj-card {
@@ -1429,13 +1434,18 @@ mark.pmp18-share {
     .pmp18-obj-card-meta strong { font-size: 11px; }
     .pmp18-obj-card-meta small { font-size: 8px; }
 
-    /* v1.9.17: hcol-head sticky below the two-strip stack.
-       top = topbar(49) + baseline(~36) + objects(~64) ≈ 149 */
-    .pmp18-hcol-head { top: 149px; padding: 6px 10px; gap: 3px; }
+    /* v1.9.18: hcol-head below the sticky wrap; height via variable.
+       baseline(~40) + objects(~76) ≈ 116 on mobile. */
+    .pmp18-compare-workspace { --pmp18-sticky-h: 116px; }
+    .pmp18-hcol-head { padding: 6px 10px; gap: 3px; }
 
     /* Default mobile: stacked. v1.9.17: NO internal scroll — let the whole
-       page scroll so the other column is reachable by swiping down. */
+       page scroll so the other column is reachable by swiping down.
+       v1.9.18: focus-wrap must not be flex:1 (it was clamped to viewport and
+       the bottom column was unreachable); let it grow to natural height. */
     .pmp18-focus-wrap {
+        flex: none;
+        height: auto;
         flex-direction: column;
         padding: 6px 10px 8px;
         overflow: visible;
@@ -1476,5 +1486,5 @@ mark.pmp18-share {
     .pmp18-obj-card { min-width: 88px; max-width: 110px; height: 48px; }
     .pmp18-obj-card .pmp18-avatar { width: 26px; height: 26px; flex: 0 0 26px; }
     .pmp18-objects-strip { min-height: 58px; }
-    .pmp18-hcol-head { top: 143px; }
+    .pmp18-compare-workspace { --pmp18-sticky-h: 108px; }
 }

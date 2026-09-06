@@ -107,14 +107,16 @@ export function renderCompareWorkspace(personas) {
                 </div>
             </div>
 
-            <div class="pmp18-baseline-strip">
-                <span class="pmp18-strip-label">基准</span>
-                <div class="pmp18-baseline-scroll">${baselineCards}</div>
-            </div>
+            <div class="pmp18-sticky-wrap">
+                <div class="pmp18-baseline-strip">
+                    <span class="pmp18-strip-label">基准</span>
+                    <div class="pmp18-baseline-scroll">${baselineCards}</div>
+                </div>
 
-            <div class="pmp18-objects-strip">
-                <span class="pmp18-strip-label">对象</span>
-                <div class="pmp18-objects-scroll">${objectCards}</div>
+                <div class="pmp18-objects-strip">
+                    <span class="pmp18-strip-label">对象</span>
+                    <div class="pmp18-objects-scroll">${objectCards}</div>
+                </div>
             </div>
 
             ${renderCompareLegend(fragmentMode, shortMode)}
