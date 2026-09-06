@@ -383,7 +383,7 @@ export function ensureRoot() {
             if (ids.length < 2) return;
             state.compareIds = ids;
             state.baselineId = ids[0];
-            state.focusOtherId = ids[1];
+            state.focusOtherId = null; // 多选进入后先不选对象，由用户点卡片
             state.selected.clear();
             renderManager();
             return;
@@ -398,15 +398,15 @@ export function ensureRoot() {
         if (action === 'set-baseline') {
             const id = String(target.dataset.id);
             state.baselineId = id;
-            if (state.focusOtherId === id) {
-                const other = state.compareIds.find(x => x !== id);
-                if (other) state.focusOtherId = other;
-            }
+            if (state.focusOtherId === id) state.focusOtherId = null;
+            // focus may still be valid if it remains in others
+            if (state.focusOtherId && state.focusOtherId === id) state.focusOtherId = null;
             renderManager();
             return;
         }
         if (action === 'set-focus-other') {
-            state.focusOtherId = String(target.dataset.id);
+            const id = String(target.dataset.id);
+            state.focusOtherId = (state.focusOtherId === id) ? null : id;
             renderManager();
             return;
         }

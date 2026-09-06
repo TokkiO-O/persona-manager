@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.18",
-  "description": "版本号可点开更新日志；自动检查并显示 NEW；弹窗实心底框。",
+  "version": "1.9.19",
+  "description": "多选对比：基准固定+对象全文横滑；点选高亮；移动端可滚全文。",
   "hooks": {
     "update": "onUpdate"
   }
