@@ -23,7 +23,7 @@ Persona Manager 是一个 SillyTavern 扩展，帮助你浏览、对比、清理
 酒馆主菜单 → Extensions → Install Extension → 粘贴仓库地址：
 
 ```
-https://github.com/xingx121/persona-manager/archive/refs/heads/main.zip
+https://github.com/TokkiO-O/persona-manager.git
 ```
 
 **方式 2 · 手动**
