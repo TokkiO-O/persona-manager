@@ -1484,11 +1484,11 @@ mark.pmp18-share {
        v1.9.18: focus-wrap must not be flex:1 (it was clamped to viewport and
        the bottom column was unreachable); let it grow to natural height. */
     .pmp18-focus-wrap {
-        flex: none;
-        height: auto;
+        flex: none !important;
+        height: auto !important;
         flex-direction: column;
         padding: 6px 10px 8px;
-        overflow: visible;
+        overflow: visible !important;
     }
     .pmp18-focus-wrap .pmp18-hcol-base,
     .pmp18-focus-wrap .pmp18-hcol-other {
@@ -1518,7 +1518,7 @@ mark.pmp18-share {
         width: auto;
         margin-bottom: 0;
     }
-    .pmp18-compare-workspace.is-side .pmp18-hcol-body { max-height: 55vh; overflow-y: auto; font-size: 11px; }
+    .pmp18-compare-workspace.is-side .pmp18-hcol-body { max-height: none; overflow: visible; font-size: 12px; }
     .pmp18-compare-workspace.is-side .pmp18-pair-person span { display: none; }
 }
 
@@ -1530,23 +1530,24 @@ mark.pmp18-share {
 }
 
 
-/* ===== v1.9.19/20 multi-compare: fixed baseline + horizontal object cards ===== */
+
+/* ===== Multi-compare body (desktop + mobile) ===== */
 .pmp18-multi-body {
-    flex: 1 1 auto;
-    min-height: 0;
     display: flex;
     flex-direction: row;
+    flex: 1 1 auto;
+    min-height: 180px;
+    gap: 10px;
+    padding: 8px 12px 16px;
     overflow: hidden;
-    gap: 0;
-    padding: 8px 12px 12px;
 }
 .pmp18-multi-base-fixed {
-    flex: 0 0 min(38%, 340px);
-    max-width: 380px;
-    min-width: 200px;
-    min-height: 0;
+    flex: 0 0 min(36%, 320px);
+    max-width: 360px;
+    min-width: 180px;
     display: flex;
     flex-direction: column;
+    min-height: 0;
     border: 1px solid rgba(255,138,98,.28);
     border-radius: 12px;
     background: rgba(255,138,98,.04);
@@ -1579,14 +1580,13 @@ mark.pmp18-share {
     gap: 10px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 0 4px 4px 10px;
+    padding-bottom: 4px;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x proximity;
-    touch-action: pan-x pan-y;
 }
 .pmp18-multi-other-card {
-    flex: 0 0 min(320px, 78vw);
-    max-width: 420px;
+    flex: 0 0 min(300px, 70vw);
+    max-width: 400px;
     min-height: 0;
     height: 100%;
     display: flex;
@@ -1597,140 +1597,159 @@ mark.pmp18-share {
     overflow: hidden;
     cursor: pointer;
     scroll-snap-align: start;
-    transition: border-color .15s, box-shadow .15s, background .15s;
-}
-.pmp18-multi-other-card:hover {
-    border-color: rgba(100,140,255,.35);
 }
 .pmp18-multi-other-card.is-focus {
     border-color: rgba(100,140,255,.55);
-    box-shadow: 0 0 0 2px rgba(100,140,255,.22);
+    box-shadow: 0 0 0 2px rgba(100,140,255,.2);
     background: rgba(100,140,255,.06);
 }
 .pmp18-multi-focus-tag {
-    flex: 0 0 auto;
     font-size: 11px;
     font-weight: 600;
     color: #4a6cf7;
     padding: 2px 8px;
     border-radius: 999px;
     background: rgba(100,140,255,.15);
-    border: 1px solid rgba(100,140,255,.3);
+}
+.pmp18-col-block.plain {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.55;
+    opacity: .92;
 }
 
-/* stacked: base on top, others row below — desktop explicit */
+/* desktop stacked */
 .pmp18-compare-workspace.is-stacked .pmp18-multi-body {
     flex-direction: column;
-    overflow: hidden;
 }
 .pmp18-compare-workspace.is-stacked .pmp18-multi-base-fixed {
-    flex: 0 0 42%;
+    flex: 0 0 40%;
     max-width: none;
     width: 100%;
-    max-height: 42%;
 }
 .pmp18-compare-workspace.is-stacked .pmp18-multi-others-scroll {
     flex: 1 1 auto;
-    overflow-x: auto;
-    overflow-y: hidden;
-    min-height: 0;
-    padding-left: 0;
-}
-.pmp18-compare-workspace.is-stacked .pmp18-multi-other-card {
-    height: 100%;
+    min-height: 160px;
 }
 
 /*
- * Mobile compare scroll unlock
- * Root cause: workspace/multi-body used flex:1 + overflow:hidden + fixed vh,
- * so neither page nor columns could scroll to full text.
- * Strategy: let .pmp18-content be the only vertical scroller; workspace grows with content.
+ * Mobile: from-scratch layout
+ * - Workspace grows with content; .pmp18-content is the only vertical scroller
+ * - Body is a vertical stack: base, then every object card full-width
+ * - No nested height locks, no horizontal rail that clips cards
  */
 @media (max-width: 900px) {
     .pmp18-compare-workspace {
         flex: none !important;
         height: auto !important;
         max-height: none !important;
-        min-height: 0 !important;
         overflow: visible !important;
+        min-height: 0 !important;
+    }
+    .pmp18-compare-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 6;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 10px;
     }
     .pmp18-sticky-wrap {
         position: sticky;
-        top: 49px;
-        z-index: 4;
+        top: 48px;
+        z-index: 5;
     }
-    /* 默认左右 + 上下切换共用：整页可纵向滚，对象区可横向滑 */
+    .pmp18-baseline-strip,
+    .pmp18-objects-strip {
+        padding: 6px 10px;
+        min-height: 0;
+    }
+    .pmp18-share-panel {
+        margin: 6px 10px;
+        max-height: 96px;
+        overflow-y: auto;
+    }
+    .pmp18-detail-meta {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
     .pmp18-multi-body {
+        display: flex !important;
+        flex-direction: column !important;
         flex: none !important;
         height: auto !important;
         max-height: none !important;
+        min-height: 0 !important;
         overflow: visible !important;
-        padding: 8px 10px 24px;
-        gap: 10px;
+        padding: 8px 10px 32px !important;
+        gap: 12px !important;
     }
     .pmp18-multi-base-fixed {
         flex: none !important;
-        width: 100%;
+        width: 100% !important;
         max-width: none !important;
         min-width: 0 !important;
-        max-height: none !important;
-        height: auto !important;
-        overflow: visible !important;
-    }
-    .pmp18-multi-base-body {
-        flex: none !important;
-        max-height: none !important;
-        overflow: visible !important;
-    }
-    .pmp18-multi-others-scroll {
-        flex: none !important;
-        width: 100%;
-        min-height: 200px;
-        max-height: none !important;
-        overflow-x: auto !important;
-        overflow-y: visible !important;
-        padding: 4px 2px 12px;
-        touch-action: pan-x pan-y;
-    }
-    .pmp18-multi-other-card {
-        flex: 0 0 min(300px, 85vw);
         height: auto !important;
         max-height: none !important;
         overflow: visible !important;
     }
+    .pmp18-multi-base-body,
     .pmp18-multi-other-body {
         flex: none !important;
+        overflow: visible !important;
+        max-height: none !important;
+        min-height: 0 !important;
+    }
+    .pmp18-multi-others-scroll {
+        display: flex !important;
+        flex-direction: column !important;
+        flex: none !important;
+        width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        gap: 12px !important;
+        padding: 0 !important;
+        scroll-snap-type: none !important;
+    }
+    .pmp18-multi-other-card {
+        flex: none !important;
+        width: 100% !important;
+        max-width: none !important;
+        height: auto !important;
         max-height: none !important;
         overflow: visible !important;
     }
 
-    /* 左右：基准与对象区上下排列，对象区仍横滑（小屏并排太窄） */
-    .pmp18-compare-workspace.is-side .pmp18-multi-body {
-        flex-direction: column !important;
-    }
-    .pmp18-compare-workspace.is-side .pmp18-multi-base-fixed {
-        width: 100%;
-    }
-
-    /* 上下：同样整页滚 + 对象横滑，不锁高度 */
+    /* 左右 / 上下在手机上都是纵向堆叠全文，保证能滑完；开关仍可用但不锁高度 */
+    .pmp18-compare-workspace.is-side .pmp18-multi-body,
     .pmp18-compare-workspace.is-stacked .pmp18-multi-body {
         flex-direction: column !important;
         overflow: visible !important;
+        height: auto !important;
     }
+    .pmp18-compare-workspace.is-side .pmp18-multi-base-fixed,
     .pmp18-compare-workspace.is-stacked .pmp18-multi-base-fixed {
+        width: 100% !important;
         max-height: none !important;
         flex: none !important;
     }
+    .pmp18-compare-workspace.is-side .pmp18-multi-others-scroll,
     .pmp18-compare-workspace.is-stacked .pmp18-multi-others-scroll {
+        flex-direction: column !important;
+        overflow: visible !important;
         max-height: none !important;
-        min-height: 200px;
     }
 
-    /* legacy focus-wrap if any */
+    /* kill legacy focus-wrap locks if any residual */
     .pmp18-focus-wrap {
         flex: none !important;
         height: auto !important;
         overflow: visible !important;
+        flex-direction: column !important;
     }
     .pmp18-focus-wrap .pmp18-hcol-body {
         max-height: none !important;

@@ -251,59 +251,58 @@ export function extractSharedSnippets(aText, bText, opts = {}) {
     const pushMatches = (text, re) => {
         const m = text.match(re) || [];
         for (const x of m) {
-            const t = x.trim();
-            if (t.length >= minLen) candidates.add(t);
+            const t0 = String(x).trim();
+            if (t0.length >= minLen) candidates.add(t0);
         }
     };
 
-    // 1) Measurements: number REQUIRED to come with a unit.
-    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|mm|cm³|m|岁|年|月|日|%|度|个|V|W|cm3|kg\/m[²2]?)/gi);
-    // 2) Phrases: Han/alpha runs. Short mode allows length 2 (e.g. "168cm" part).
-    const phraseRe = shortMode
-        ? /[A-Za-z\u4e00-\u9fff]{2,14}/g
-        : /[A-Za-z\u4e00-\u9fff]{3,14}/g;
-    pushMatches(a, phraseRe);
+    // Measurements: number + unit only
+    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|mm|m|岁|%|斤)/gi);
 
-    // 3) Quoted / bracketed short labels
-    pushMatches(a, /[「『"']([^「『"'\n]{2,18})[」』"']/g);
+    // Chinese phrases (prefer these)
+    pushMatches(a, /[\u4e00-\u9fff]{2,12}/g);
 
-    // In short mode, don't blackhole common descriptor words as aggressively —
-    // a 200-char persona often only has descriptive vocab, so dropping every
-    // one of them leaves nothing to share.
-    const stopwordOverride = shortMode
-        ? new Set()  // disable blacklist entirely for short mode
-        : COMMON_STOPWORDS;
+    // Mixed: Chinese + number like 168cm already covered; skip pure ASCII keys
 
-    const shared = [];
     const bLow = b.toLocaleLowerCase();
+    const shared = [];
     for (const c of candidates) {
-        if (c.length < minLen || c.length > 24) continue;
-        if (stopwordOverride.has(c.toLocaleLowerCase())) continue;
+        if (!isMeaningfulSnippet(c, minLen)) continue;
+        if (COMMON_STOPWORDS.has(c.toLocaleLowerCase())) continue;
+        if (COMMON_STOPWORDS.has(c)) continue;
         if (b.includes(c) || bLow.includes(c.toLocaleLowerCase())) shared.push(c);
     }
 
-    // unique, longer first, then drop if substring of an already-kept longer one
     const seen = new Set();
     return shared
         .sort((x, y) => y.length - x.length)
         .filter(s => {
             const k = normalizeText(s);
-            if (seen.has(k)) return false;
+            if (!k || seen.has(k)) return false;
             for (const keep of seen) {
-                if (keep.includes(s) && keep !== s) return false;
+                if (keep.includes(k) && keep !== k) return false;
             }
             seen.add(k);
             return true;
         })
-        .slice(0, 40);
+        .slice(0, 24);
 }
 
-// See COMMON_STOPWORDS at top of file (must be declared before
-// extractSharedSnippets to avoid the const TDZ trap).
+/** Drop schema keys, pure English fillers, tiny tokens */
+function isMeaningfulSnippet(s, minLen) {
+    const t = String(s || '').trim();
+    if (t.length < minLen || t.length > 20) return false;
+    // pure ASCII identifier / field name (Personality, Basic_Info, name, and…)
+    if (/^[A-Za-z][A-Za-z0-9_]*$/.test(t)) return false;
+    // mostly punctuation
+    if (/^[\s\-_=:#.]+$/.test(t)) return false;
+    // must contain Chinese or a digit (measurement / concrete token)
+    if (!/[\u4e00-\u9fff0-9]/.test(t)) return false;
+    // single digit alone
+    if (/^\d$/.test(t)) return false;
+    return true;
+}
 
-/** Split text into sentences by Chinese + English punctuation, keeping the
- *  delimiter. Used by short-persona compare so we can do sentence-level
- *  matching instead of unit-level. Returns [] on empty. */
 export function splitSentences(text) {
     const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
     if (!raw) return [];

@@ -75,34 +75,16 @@ export function renderCompareWorkspace(personas) {
             sharePanel = '';
         }
     } else {
-        // No focus: soft-highlight union of snippets against all others
-        const union = [];
-        const seen = new Set();
-        for (const oid of others) {
-            const op = personas.find(p => p.id === oid);
-            if (!op) continue;
-            const sn = extractSharedSnippets(base.description, op.description, {
-                shortMode: isShortText(base.description, op.description),
-            });
-            for (const s of sn) {
-                const k = String(s).toLowerCase();
-                if (!seen.has(k)) {
-                    seen.add(k);
-                    union.push(s);
-                }
-            }
-        }
-        baseBody = `<div class="pmp18-col-block frag">${highlightSnippets(base.description, union)}</div>`;
-        sharePanel = union.length
-            ? `<div class="pmp18-share-panel"><div class="pmp18-share-title">共同片段（${union.length}）· 相对全部对象</div><div class="pmp18-share-list">${union.map(s => `<span class="pmp18-share-chip">${escapeHtml(s)}</span>`).join('')}</div></div>`
-            : '';
+        // 未选对象：纯文本，不高亮、不展示共同片段
+        baseBody = `<div class="pmp18-col-block plain">${escapeHtml(base.description).replace(/\n/g, '<br>')}</div>`;
+        sharePanel = '';
     }
 
     const metaLine = focusPersona
         ? (fragmentMode
             ? `共同片段 ${stats.same}${shortMode ? ' · 短人设' : ''}`
             : `${Math.round(score * 100)}% · 同 ${stats.same} · 改 ${stats.replace} · 仅基准 ${stats.remove} · 仅对方 ${stats.add}`)
-        : `请点选一个对象卡 · 共 ${others.length} 个对象`;
+        : (others.length === 1 ? '自动对比中' : `请点选一个对象 · 共 ${others.length} 个`);
 
     // Top chips
     const baselineCards = ids.map(id => {
@@ -143,8 +125,8 @@ export function renderCompareWorkspace(personas) {
                 bodyHtml = renderFocusBlocks(base.description, p.description, 'other', showDiffOnly, { shortMode: sm });
             }
         } else {
-            const sn = extractSharedSnippets(base.description, p.description, { shortMode: sm });
-            bodyHtml = `<div class="pmp18-col-block frag">${highlightSnippets(p.description, sn)}</div>`;
+            // 未选中：不标颜色
+            bodyHtml = `<div class="pmp18-col-block plain">${escapeHtml(p.description).replace(/\n/g, '<br>')}</div>`;
         }
         return `
             <article class="pmp18-multi-other-card ${isFocus ? 'is-focus' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}" data-dblaction="edit-full" data-id2="${escapeHtml(id)}">

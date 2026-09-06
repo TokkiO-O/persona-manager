@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.20",
-  "description": "双人自动高亮；移动端默认左右且解锁全文滚动。",
+  "version": "1.9.21",
+  "description": "共同片段去噪；未选不高亮；移动端纵向全文可滚。",
   "hooks": {
     "update": "onUpdate"
   }
