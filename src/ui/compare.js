@@ -28,8 +28,10 @@ export function renderCompareWorkspace(personas) {
     }
     if (!state.baselineId || !ids.includes(state.baselineId)) state.baselineId = ids[0];
     const others = ids.filter(id => id !== state.baselineId);
-    // Do NOT auto-pick focusOtherId — user chooses an object card
-    if (state.focusOtherId && !others.includes(state.focusOtherId)) {
+    // 仅 1 个对象：自动进入对比高亮；≥2 个对象：不默认选中，由用户点选
+    if (others.length === 1) {
+        state.focusOtherId = others[0];
+    } else if (state.focusOtherId && !others.includes(state.focusOtherId)) {
         state.focusOtherId = null;
     }
 
@@ -160,7 +162,8 @@ export function renderCompareWorkspace(personas) {
             </article>`;
     }).join('');
 
-    const viewModeClass = state.viewMode ? `is-${state.viewMode}` : '';
+    const viewMode = state.viewMode === 'stacked' ? 'stacked' : 'side';
+    const viewModeClass = `is-${viewMode}`;
 
     return `
         <div class="pmp18-compare-workspace ${viewModeClass}">
@@ -173,7 +176,7 @@ export function renderCompareWorkspace(personas) {
                 <div class="pmp18-compare-tools">
                     <button type="button" class="pmp18-small-btn ${state.showToc ? 'is-on' : ''}" data-action="toggle-toc" title="目录与搜索"><i class="fa-solid fa-list"></i></button>
                     ${fragmentMode && focusPersona ? '' : `<button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>`}
-                    <button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${state.viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${state.viewMode === 'side' ? '↕ 上下' : '↔ 左右'}</button>
+                    <button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${viewMode === 'side' ? '↕ 上下' : '↔ 左右'}</button>
                     <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}">编辑基准</button>
                     ${focusPersona ? `<button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(focusPersona.id)}">编辑对方</button>` : ''}
                 </div>

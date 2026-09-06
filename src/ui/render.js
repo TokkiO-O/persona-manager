@@ -644,6 +644,7 @@ export function openManager(tab = 'all') {
     ensureRoot();
     state.active = true;
     scheduleAutoUpdateCheck();
+    if (state.viewMode !== 'stacked' && state.viewMode !== 'side') state.viewMode = 'side';
     state.tab = tab;
     state.selected.clear();
     state.compareIds = [];

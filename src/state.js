@@ -22,7 +22,7 @@ export const state = {
     settings: loadSettings(),
     updateInfo: null,
     // v1.9.15: compare view UI state (not persisted, session-only)
-    viewMode: null,        // 'stacked' | 'side' | null (auto)
+    viewMode: 'side',      // 'stacked' | 'side' — mobile/desktop default 左右
     showToc: false,        // diff table-of-contents drawer
     tocQuery: '',          // search within diff
 };
