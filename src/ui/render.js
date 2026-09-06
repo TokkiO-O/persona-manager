@@ -228,6 +228,8 @@ export function renderManagerInner() {
         if (newCompare) newCompare.scrollTop = savedScroll.compare;
         const newTabBar = root.querySelector('.pmp18-tabs');
         if (newTabBar) newTabBar.scrollLeft = savedTabScroll;
+        // v1.9.15: fold long same blocks for mobile reading
+        applyFoldDefaults(root);
         if (focusKey) {
             const el = root.querySelector(`[data-pmp18-keep-focus="${CSS.escape(focusKey)}"]`);
             if (el) {
@@ -238,6 +240,43 @@ export function renderManagerInner() {
             }
         }
     });
+}
+
+// v1.9.15: fold long same blocks for mobile reading. Walk each hcol-body,
+// find runs of 3+ same-class blocks, mark all but the first as folded.
+// Idempotent: marks are reset on each render.
+function applyFoldDefaults(root) {
+    const FOLD_MIN = 3;
+    const bodies = root.querySelectorAll('.pmp18-hcol-body');
+    bodies.forEach(body => {
+        const blocks = body.querySelectorAll('.pmp18-col-block.same');
+        blocks.forEach(b => b.classList.remove('is-folded'));
+        let run = [];
+        for (const b of blocks) {
+            if (run.length === 0) { run.push(b); continue; }
+            const prev = run[run.length - 1];
+            if (prev.nextElementSibling === b) { run.push(b); continue; }
+            // Run ended — apply fold if length >= FOLD_MIN
+            if (run.length >= FOLD_MIN) {
+                for (let i = 1; i < run.length; i++) run[i].classList.add('is-folded');
+            }
+            run = [b];
+        }
+        // tail
+        if (run.length >= FOLD_MIN) {
+            for (let i = 1; i < run.length; i++) run[i].classList.add('is-folded');
+        }
+    });
+    // One-time global click handler for fold toggle
+    if (!root.dataset.boundFold) {
+        root.dataset.boundFold = '1';
+        root.addEventListener('click', (e) => {
+            const block = e.target.closest('.pmp18-col-block.same');
+            if (!block) return;
+            if (window.getSelection && String(window.getSelection()) !== '') return;
+            block.classList.toggle('is-folded');
+        });
+    }
 }
 
 
@@ -253,6 +292,21 @@ export function ensureRoot() {
     }
     if (root.dataset.bound === '1') return;
     root.dataset.bound = '1';
+
+    // dblclick on compare cards: open editor for the card's persona
+    root.addEventListener('dblclick', event => {
+        const target = event.target.closest('[data-dblaction]');
+        if (!target) return;
+        const action = target.dataset.dblaction;
+        const id = String(target.dataset.id2 || target.dataset.id || '');
+        if (!id) return;
+        if (action === 'edit-full') {
+            // Don't bubble to click handler (which would set baseline / focus other)
+            event.preventDefault();
+            event.stopPropagation();
+            openFullEditor(id);
+        }
+    });
 
     root.addEventListener('click', event => {
         const target = event.target.closest('[data-action]');
@@ -354,6 +408,27 @@ export function ensureRoot() {
         if (action === 'set-focus-other') {
             state.focusOtherId = String(target.dataset.id);
             renderManager();
+            return;
+        }
+        if (action === 'set-view-mode') {
+            state.viewMode = target.dataset.mode === 'stacked' ? 'stacked' : 'side';
+            renderManager();
+            return;
+        }
+        if (action === 'toggle-toc') {
+            state.showToc = !state.showToc;
+            if (!state.showToc) state.tocQuery = '';
+            renderManager();
+            return;
+        }
+        if (action === 'close-toc') {
+            state.showToc = false;
+            state.tocQuery = '';
+            renderManager();
+            return;
+        }
+        if (action === 'toc-jump') {
+            handleTocJump(target);
             return;
         }
         if (action === 'toggle-diff-only') {
@@ -478,6 +553,19 @@ export function ensureRoot() {
             if (next) next.setSelectionRange(caret, caret);
             return;
         }
+        if (event.target.id === 'pmp18-toc-search') {
+            state.tocQuery = event.target.value;
+            // In-place: just refresh the toc body, don't re-render the whole manager
+            const root = document.getElementById(ROOT_ID);
+            const panel = root?.querySelector('.pmp18-toc-panel .pmp18-toc-body');
+            if (panel) {
+                // Re-derive list using the same logic as renderTocPanel
+                // but cheaper: just toggle visibility via a re-render of toc body.
+                // Easiest: schedule a render and let the new HTML replace.
+                scheduleRender();
+            }
+            return;
+        }
         if (event.target.id === 'pmp18-threshold') {
             state.settings.similarityThreshold = Math.min(0.9, Math.max(0.3, Number(event.target.value) / 100));
             saveSettingsLocal();
@@ -492,6 +580,64 @@ export function ensureRoot() {
             if (label) label.textContent = `${Math.round(state.settings.softMatchThreshold * 100)}%`;
         }
     });
+}
+
+// TOC click handler — scroll the matching block into view and flash it.
+function handleTocJump(target) {
+    const jump = String(target.dataset.tocJump || '');
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return;
+    let sel = null;
+    if (jump.startsWith('row-')) {
+        // The TOC index and the rendered block index may not align because the
+        // TOC was built from unorderedDiff rows but the rendered blocks are
+        // post-processed (ghost + showDiffOnly filters). We do a best-effort
+        // match by counting block tags that match the type from the dataset.
+        const idx = parseInt(jump.slice(4), 10) || 0;
+        const blocks = root.querySelectorAll('.pmp18-hcol-body .pmp18-col-block');
+        // Use the visible blocks only (skip pmp18-ghost)
+        const visible = Array.from(blocks).filter(b => !b.classList.contains('pmp18-ghost'));
+        // The TOC was built from full rows; visible might differ — fall back
+        // to a best-effort by walking all blocks.
+        const candidates = Array.from(blocks);
+        sel = candidates[idx] || null;
+    } else if (jump.startsWith('share-')) {
+        // find the mark with this snippet text
+        const marks = root.querySelectorAll('.pmp18-col-block.frag mark.pmp18-share');
+        const idx = parseInt(jump.slice(6), 10) || 0;
+        sel = marks[idx] || null;
+    }
+    if (!sel) return;
+    sel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    sel.classList.add('pmp18-toc-flash');
+    setTimeout(() => sel.classList.remove('pmp18-toc-flash'), 1500);
+    // Also try to highlight search matches if any
+    if (state.tocQuery) {
+        const q = state.tocQuery.toLowerCase();
+        root.querySelectorAll('.pmp18-hcol-body mark.pmp18-search-hit').forEach(m => {
+            m.outerHTML = m.innerHTML;
+        });
+        const walker = document.createTreeWalker(root.querySelector('.pmp18-hcol-body') || root, NodeFilter.SHOW_TEXT, null);
+        const nodes = [];
+        let n;
+        while ((n = walker.nextNode())) nodes.push(n);
+        for (const node of nodes) {
+            const lower = node.nodeValue.toLowerCase();
+            const i = lower.indexOf(q);
+            if (i < 0) continue;
+            const before = node.nodeValue.slice(0, i);
+            const hit = node.nodeValue.slice(i, i + q.length);
+            const after = node.nodeValue.slice(i + q.length);
+            const span = document.createElement('mark');
+            span.className = 'pmp18-search-hit';
+            span.textContent = hit;
+            const parent = node.parentNode;
+            parent.insertBefore(document.createTextNode(before), node);
+            parent.insertBefore(span, node);
+            parent.insertBefore(document.createTextNode(after), node);
+            parent.removeChild(node);
+        }
+    }
 }
 
 export function openManager(tab = 'all') {

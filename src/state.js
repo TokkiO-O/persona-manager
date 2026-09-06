@@ -21,6 +21,10 @@ export const state = {
     focusOtherId: null,
     settings: loadSettings(),
     updateInfo: null,
+    // v1.9.15: compare view UI state (not persisted, session-only)
+    viewMode: null,        // 'stacked' | 'side' | null (auto)
+    showToc: false,        // diff table-of-contents drawer
+    tocQuery: '',          // search within diff
 };
 
 export function saveSettingsLocal() {

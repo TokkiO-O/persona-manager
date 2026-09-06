@@ -1,4 +1,4 @@
-import { COMMON_STOPWORDS } from './constants.js';
+import { COMMON_STOPWORDS, SHORT_TEXT_THRESHOLD } from './constants.js';
 import { state } from './state.js';
 import { escapeHtml, normalizeText } from './util.js';
 import { similarity } from './similarity.js';
@@ -234,41 +234,51 @@ export function looksStructured(text) {
     return field / lines.length >= 0.4;
 }
 
-/** Shared short facts (numbers, measures, short phrases) for cross-structure compare */
-export function extractSharedSnippets(aText, bText) {
+/** Shared short facts (numbers, measures, short phrases) for cross-structure compare
+ *  @param {string} aText
+ *  @param {string} bText
+ *  @param {object} [opts]
+ *  @param {boolean} [opts.shortMode=false] relax length floor and skip a few stopwords
+ */
+export function extractSharedSnippets(aText, bText, opts = {}) {
+    const shortMode = !!opts.shortMode;
     const a = String(aText || '');
     const b = String(bText || '');
     if (!a || !b) return [];
 
+    const minLen = shortMode ? 2 : 3;
     const candidates = new Set();
     const pushMatches = (text, re) => {
         const m = text.match(re) || [];
         for (const x of m) {
             const t = x.trim();
-            if (t.length >= 3) candidates.add(t);
+            if (t.length >= minLen) candidates.add(t);
         }
     };
 
-    // 1) Measurements: number REQUIRED to come with a unit. A bare "kg" / "cm"
-    //    / "%" is a noisy overlap that almost every persona has; the unit alone
-    //    conveys no shared identity.
-    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|mm|cm³|m|岁|年|月|日|%|度|个|岁|V|W|cm3|kg\/m[²2]?)/gi);
-    // 2) Proper-noun-ish phrases: Han/alpha runs, length 3..14.
-    //    (length 2 dropped because too many common CJK words like 身高/三围/体重
-    //    /性格/特点/名字/年龄/性别/血型 would match and dominate the list.)
-    pushMatches(a, /[A-Za-z\u4e00-\u9fff]{3,14}/g);
+    // 1) Measurements: number REQUIRED to come with a unit.
+    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|mm|cm³|m|岁|年|月|日|%|度|个|V|W|cm3|kg\/m[²2]?)/gi);
+    // 2) Phrases: Han/alpha runs. Short mode allows length 2 (e.g. "168cm" part).
+    const phraseRe = shortMode
+        ? /[A-Za-z\u4e00-\u9fff]{2,14}/g
+        : /[A-Za-z\u4e00-\u9fff]{3,14}/g;
+    pushMatches(a, phraseRe);
 
-    // 3) Quoted / bracketed short labels, e.g. 『发色：黑』, "瞳色：蓝"
+    // 3) Quoted / bracketed short labels
     pushMatches(a, /[「『"']([^「『"'\n]{2,18})[」』"']/g);
-    // Strip the surrounding quotes — we keep the inner text
-    // (handled below in the dedup pass)
+
+    // In short mode, don't blackhole common descriptor words as aggressively —
+    // a 200-char persona often only has descriptive vocab, so dropping every
+    // one of them leaves nothing to share.
+    const stopwordOverride = shortMode
+        ? new Set()  // disable blacklist entirely for short mode
+        : COMMON_STOPWORDS;
 
     const shared = [];
-    const aLow = a.toLocaleLowerCase();
     const bLow = b.toLocaleLowerCase();
     for (const c of candidates) {
-        if (c.length < 3 || c.length > 24) continue;
-        if (COMMON_STOPWORDS.has(c.toLocaleLowerCase())) continue;
+        if (c.length < minLen || c.length > 24) continue;
+        if (stopwordOverride.has(c.toLocaleLowerCase())) continue;
         if (b.includes(c) || bLow.includes(c.toLocaleLowerCase())) shared.push(c);
     }
 
@@ -291,11 +301,39 @@ export function extractSharedSnippets(aText, bText) {
 // See COMMON_STOPWORDS at top of file (must be declared before
 // extractSharedSnippets to avoid the const TDZ trap).
 
+/** Split text into sentences by Chinese + English punctuation, keeping the
+ *  delimiter. Used by short-persona compare so we can do sentence-level
+ *  matching instead of unit-level. Returns [] on empty. */
+export function splitSentences(text) {
+    const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (!raw) return [];
+    // Split on sentence terminators but keep them attached to the preceding chunk
+    const re = /[^。！？；…\.\!\?]+[。！？；…\.\!\?]+|[^。！？；…\.\!\?]+$/g;
+    const out = [];
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+        const t = m[0].trim();
+        if (t) out.push(t);
+    }
+    return out.length ? out : (raw.trim() ? [raw.trim()] : []);
+}
+
+export function isShortText(baseText, otherText) {
+    const a = String(baseText || '').length;
+    const b = String(otherText || '').length;
+    return a < SHORT_TEXT_THRESHOLD && b < SHORT_TEXT_THRESHOLD;
+}
+
 export function shouldUseFragmentMode(baseText, otherText, score) {
     if (score < 0.15) return true;
     const aS = looksStructured(baseText);
     const bS = looksStructured(otherText);
     if (aS !== bS) return true;
+    // v1.9.15: short personas (both sides under threshold) force fragment mode
+    // because unit-level diff can't find any matches for terse descriptions.
+    // Skip if BOTH are actually well-structured (e.g. two structured 200-char
+    // short field lists — the existing unit diff handles them fine).
+    if (isShortText(baseText, otherText) && !(aS && bS)) return true;
     return false;
 }
 
@@ -310,57 +348,75 @@ export function highlightSnippets(text, snippets) {
     return html;
 }
 
-export function renderFragmentCompare(baseText, otherText) {
-    const shared = extractSharedSnippets(baseText, otherText);
+export function renderFragmentCompare(baseText, otherText, opts = {}) {
+    const shortMode = !!opts.shortMode;
+    const shared = extractSharedSnippets(baseText, otherText, { shortMode });
     const shareHtml = shared.length
         ? `<div class="pmp18-share-list">${shared.map(s => `<span class="pmp18-share-chip">${escapeHtml(s)}</span>`).join('')}</div>`
         : `<div class="pmp18-muted">未抽出可对齐的共同短句/数字（结构差异较大时属正常）</div>`;
 
     return {
         legendExtra: true,
+        shortMode,
         sharedCount: shared.length,
         baseHtml: `<div class="pmp18-col-block frag">${highlightSnippets(baseText, shared)}</div>`,
         otherHtml: `<div class="pmp18-col-block frag">${highlightSnippets(otherText, shared)}</div>`,
-        sharePanel: `<div class="pmp18-share-panel"><div class="pmp18-share-title">共同片段（${shared.length}）</div>${shareHtml}</div>`,
+        sharePanel: `<div class="pmp18-share-panel"><div class="pmp18-share-title">共同片段（${shared.length}）${shortMode ? ' · 短人设模式' : ''}</div>${shareHtml}</div>`,
     };
 }
 
 /** Symmetric blocks: side 'base' | 'other' */
-export function renderFocusBlocks(baseText, otherText, side, showDiffOnly) {
-    const rows = unorderedDiff(baseText, otherText);
+export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts = {}) {
+    const { shortMode = false } = opts;
+    // Short mode: split by sentence so we can match sentence ↔ sentence
+    const aText = shortMode ? splitSentences(baseText).join('\n') : baseText;
+    const bText = shortMode ? splitSentences(otherText).join('\n') : otherText;
+    const rows = unorderedDiff(aText, bText);
     const parts = [];
+    let pendingSame = 0;        // count consecutive `same` (pure) blocks
     for (const row of rows) {
         const isPureSame = row.type === 'same' && (row.a === row.b || normalizeText(row.a) === normalizeText(row.b));
         if (showDiffOnly && isPureSame) continue;
+        const lineCount = String(row.a || row.b || '').split('\n').length;
 
         if (row.type === 'same') {
             if (isPureSame) {
-                parts.push(`<div class="pmp18-col-block same">${escapeHtml(side === 'base' ? row.a : row.b)}</div>`);
+                pendingSame += 1;
+                parts.push(`<div class="pmp18-col-block same" data-pmp18-same-lines="${lineCount}">${escapeHtml(side === 'base' ? row.a : row.b)}</div>`);
+            } else {
+                pendingSame = 0;
+                const { left, right } = inlineDiffHtml(row.a, row.b);
+                parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
+            }
+        } else {
+            pendingSame = 0;
+            if (row.type === 'remove') {
+                if (side === 'base') {
+                    parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
+                } else {
+                    parts.push(`<div class="pmp18-col-block remove pmp18-ghost"><span class="pmp18-tag">基准有 · 对方无</span></div>`);
+                }
+            } else if (row.type === 'add') {
+                if (side === 'other') {
+                    parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
+                } else {
+                    parts.push(`<div class="pmp18-col-block add pmp18-ghost"><span class="pmp18-tag">对方有 · 基准无</span></div>`);
+                }
             } else {
                 const { left, right } = inlineDiffHtml(row.a, row.b);
                 parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
             }
-        } else if (row.type === 'remove') {
-            if (side === 'base') {
-                parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
-            } else {
-                parts.push(`<div class="pmp18-col-block remove pmp18-ghost"><span class="pmp18-tag">基准有 · 对方无</span></div>`);
-            }
-        } else if (row.type === 'add') {
-            if (side === 'other') {
-                parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
-            } else {
-                parts.push(`<div class="pmp18-col-block add pmp18-ghost"><span class="pmp18-tag">对方有 · 基准无</span></div>`);
-            }
-        } else {
-            const { left, right } = inlineDiffHtml(row.a, row.b);
-            parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
         }
     }
     return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无内容</div>';
 }
 
-export function renderCompareLegend(fragmentMode) {
+export function renderCompareLegend(fragmentMode, shortMode = false) {
+    const note = shortMode
+        ? '短人设模式：按句匹配，共同词高亮；如有结构化字段请补全后对比。'
+        : (fragmentMode
+            ? '当前为跨结构/低相似模式：先标共同片段，再通读全文。'
+            : '按章节对齐；粉=删、绿=增。连续相同段可折叠（>3 行）。');
     return `
         <div class="pmp18-legend">
             <span class="pmp18-legend-title">图例</span>
@@ -369,7 +425,7 @@ export function renderCompareLegend(fragmentMode) {
             <span class="pmp18-legend-item"><i class="pmp18-leg remove"></i>仅基准有</span>
             <span class="pmp18-legend-item"><i class="pmp18-leg add"></i>仅对方有</span>
             ${fragmentMode ? '<span class="pmp18-legend-item"><i class="pmp18-leg share"></i>共同片段（跨结构）</span>' : ''}
-            <span class="pmp18-legend-note">${fragmentMode ? '当前为跨结构/低相似模式：先标共同片段，再通读全文。' : '按章节对齐；粉=删、绿=增。'}</span>
+            <span class="pmp18-legend-note">${note}</span>
         </div>`;
 }
 

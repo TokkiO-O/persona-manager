@@ -1,7 +1,7 @@
 /** Shared constants for Persona Manager */
 
 export const EXT = 'Persona Manager';
-export const VERSION = '1.9.14';
+export const VERSION = '1.9.15';
 export const ROOT_ID = 'pmp18-root';
 export const BUTTON_ID = 'pmp18-entry';
 export const ENTRY_MARK = 'pmp18-entry-installed';
@@ -45,3 +45,14 @@ export const defaultSettings = {
     showDiffOnly: false,
     softMatchThreshold: 0.35,
 };
+
+/** Below this total char count for BOTH sides, treat as "short persona":
+ *  - force fragment (snippet) mode even if similarity is moderate
+ *  - use sentence-level diff instead of unit-level
+ *  - relax snippet length floor (3 -> 2) and skip a few stopwords
+ */
+export const SHORT_TEXT_THRESHOLD = 300;
+
+/** When folding identical chunks, fold when this many consecutive lines
+ *  are marked 'same' (and content is purely identical, not inline-diff). */
+export const FOLD_SAME_MIN_LINES = 3;
