@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.21",
-  "description": "共同片段去噪；未选不高亮；移动端纵向全文可滚。",
+  "version": "1.9.22",
+  "description": "修复对比模式无法滚动：对比区包进可滚动 content。",
   "hooks": {
     "update": "onUpdate"
   }

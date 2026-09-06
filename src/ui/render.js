@@ -195,7 +195,7 @@ export function renderManagerInner() {
                 <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
                 <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
             </header>
-            ${inCompare ? renderCompareWorkspace(personas) : `
+            ${inCompare ? `<main class="pmp18-content pmp18-content--compare">${renderCompareWorkspace(personas)}</main>` : `
             <div class="pmp18-toolbar">
                 <div class="pmp18-search">
                     <i class="fa-solid fa-magnifying-glass"></i>

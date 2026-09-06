@@ -43,6 +43,8 @@ body.pmp18-open { overflow: hidden !important; }
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* children with flex:1 + min-height:0 can form a scrollport */
+    min-height: 0;
     border: 1px solid rgba(0,0,0,.08);
     border-radius: 18px;
     background: var(--SmartThemeBlurTintColor, #fff);
@@ -1754,5 +1756,76 @@ mark.pmp18-share {
     .pmp18-focus-wrap .pmp18-hcol-body {
         max-height: none !important;
         overflow: visible !important;
+    }
+}
+
+
+/* ===== ROOT CAUSE FIX: compare must live inside a scrollport =====
+   Window is overflow:hidden + fixed height. If compare-workspace is a direct
+   child with height:auto + overflow:visible, excess content is CLIPPED with
+   no way to scroll. Always put compare in .pmp18-content--compare. */
+.pmp18-content--compare {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 0 0 28px;
+    touch-action: pan-y;
+}
+.pmp18-content--compare .pmp18-compare-workspace {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+}
+.pmp18-content--compare .pmp18-multi-body {
+    flex: none;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}
+.pmp18-content--compare .pmp18-multi-base-fixed,
+.pmp18-content--compare .pmp18-multi-other-card {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}
+.pmp18-content--compare .pmp18-multi-base-body,
+.pmp18-content--compare .pmp18-multi-other-body {
+    flex: none;
+    overflow: visible;
+    max-height: none;
+}
+.pmp18-content--compare .pmp18-multi-others-scroll {
+    flex: none;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}
+
+@media (max-width: 900px) {
+    .pmp18-content--compare {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch !important;
+        padding-bottom: 40px;
+    }
+    /* sticky bars stick within the content scrollport */
+    .pmp18-content--compare .pmp18-compare-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 6;
+    }
+    .pmp18-content--compare .pmp18-sticky-wrap {
+        position: sticky;
+        top: 0;
+        z-index: 5;
     }
 }
