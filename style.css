@@ -329,6 +329,20 @@ body.pmp18-open { overflow: hidden !important; }
     background: var(--SmartThemeBlurTintColor, #fff);
     backdrop-filter: blur(8px);
 }
+.pmp18-objects-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    flex: 0 0 auto;
+    position: sticky;
+    top: 101px;  /* topbar 53 + baseline-strip ~48 */
+    z-index: 4;
+    background: var(--SmartThemeBlurTintColor, #fff);
+    backdrop-filter: blur(8px);
+    min-height: 76px;
+}
 .pmp18-strip-label { font-size: 12px; opacity: .6; flex: 0 0 auto; font-weight: 600; }
 .pmp18-baseline-scroll {
     display: flex;
@@ -367,20 +381,7 @@ body.pmp18-open { overflow: hidden !important; }
 }
 .pmp18-base-card.is-active .pmp18-base-card-meta strong { color: #e8663b; }
 
-/* ===== v1.9.15 object strip (sticky bottom, 80px tall cards) ===== */
-.pmp18-objects-strip {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 20px;
-    border-bottom: 1px solid rgba(0,0,0,.06);
-    flex: 0 0 auto;
-    /* v1.9.16: no longer sticky bottom — it now lives in the scroll flow
-       between baseline-strip and the shared-snippet panel. */
-    position: static;
-    z-index: 4;
-    min-height: 96px;
-}
+/* ===== v1.9.17 object strip: sticky below baseline, compact cards ===== */
 .pmp18-objects-scroll {
     display: flex;
     flex-direction: row;
@@ -395,12 +396,12 @@ body.pmp18-open { overflow: hidden !important; }
 .pmp18-obj-card {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex: 0 0 auto;
-    min-width: 130px;
-    max-width: 180px;
-    height: 80px;
-    padding: 8px 10px;
+    min-width: 110px;
+    max-width: 160px;
+    height: 60px;
+    padding: 6px 8px;
     border: 1px solid rgba(127,127,127,.2);
     border-radius: 12px;
     background: rgba(127,127,127,.05);
@@ -414,16 +415,19 @@ body.pmp18-open { overflow: hidden !important; }
 }
 .pmp18-obj-card:hover { border-color: rgba(255,138,98,.4); transform: translateY(-1px); }
 .pmp18-obj-card.is-active {
-    border-color: rgba(255,138,98,.7);
-    background: rgba(255,138,98,.16);
-    box-shadow: 0 0 0 2px rgba(255,138,98,.4);
+    border-color: rgba(255,138,98,.85);
+    background: linear-gradient(180deg, rgba(255,138,98,.28), rgba(255,138,98,.14));
+    box-shadow: 0 0 0 2px rgba(255,138,98,.55), 0 0 12px rgba(255,138,98,.35);
+    transform: translateY(-1px);
+    color: #d95b2f;
+    font-weight: 600;
 }
-.pmp18-obj-card .pmp18-avatar { width: 44px; height: 44px; flex: 0 0 44px; }
-.pmp18-obj-card-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pmp18-obj-card .pmp18-avatar { width: 34px; height: 34px; flex: 0 0 34px; }
+.pmp18-obj-card-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .pmp18-obj-card-meta strong {
-    font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.pmp18-obj-card-meta small { font-size: 10px; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pmp18-obj-card-meta small { font-size: 9px; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Compact detail meta above diff body */
 .pmp18-detail-meta {
@@ -566,17 +570,18 @@ mark.pmp18-search-hit {
     flex: 0 0 auto;
     padding: 10px 12px;
     border-bottom: 1px solid rgba(127,127,127,.1);
-    background: var(--SmartThemeBlurTintColor, rgba(255,255,255,.94));
+    /* v1.9.17: fully opaque background so body text does NOT bleed through
+       under the sticky header (and its avatar) while scrolling. */
+    background: var(--SmartThemeMainColor, #fff);
     display: flex;
     flex-direction: column;
     gap: 6px;
     /* v1.9.16: sticky so the two columns keep their headers visible while
        scrolling inside the (stacked or side-by-side) focus area. Sits below
-       the topbar (53px). */
+       the sticky stack (topbar 53 + baseline + objects). */
     position: sticky;
-    top: 53px;
+    top: 150px;
     z-index: 3;
-    backdrop-filter: blur(8px);
 }
 .pmp18-hcol-body {
     flex: 1;
@@ -594,6 +599,8 @@ mark.pmp18-search-hit {
     border-radius: 8px;
     white-space: pre-wrap;
     word-break: break-word;
+    /* v1.9.17: keep scroll-into-view targets clear of the sticky header stack */
+    scroll-margin-top: 150px;
 }
 .pmp18-col-block.same { opacity: .7; }
 .pmp18-col-block.remove { background: rgba(235,105,105,.07); }
@@ -1404,29 +1411,30 @@ mark.pmp18-share {
     .pmp18-base-card .pmp18-avatar { width: 22px; height: 22px; flex: 0 0 22px; }
     .pmp18-base-card-meta small { display: none; }
 
-    /* v1.9.16: objects strip is no longer sticky bottom — it sits in the
-       normal flow right after the baseline strip. Trim its padding since
-       it now borders the shared-snippet panel above. */
+    /* v1.9.17: object strip sticky too, stacking right under the baseline
+       strip. top = topbar(49) + baseline strip height. */
     .pmp18-objects-strip {
         padding: 6px 12px;
         gap: 6px;
-        min-height: 86px;
+        top: 85px;  /* 49 + baseline ~36 */
+        min-height: 64px;
     }
     .pmp18-obj-card {
-        min-width: 110px;
-        max-width: 140px;
-        height: 72px;
-        padding: 6px 8px;
+        min-width: 96px;
+        max-width: 130px;
+        height: 52px;
+        padding: 5px 7px;
     }
-    .pmp18-obj-card .pmp18-avatar { width: 36px; height: 36px; flex: 0 0 36px; }
-    .pmp18-obj-card-meta strong { font-size: 12px; }
-    .pmp18-obj-card-meta small { font-size: 9px; }
+    .pmp18-obj-card .pmp18-avatar { width: 28px; height: 28px; flex: 0 0 28px; }
+    .pmp18-obj-card-meta strong { font-size: 11px; }
+    .pmp18-obj-card-meta small { font-size: 8px; }
 
-    /* v1.9.16: detail-meta removed (info merged into hcol-head). The two
-       column headers themselves are sticky just below the baseline-strip. */
-    .pmp18-hcol-head { top: 49px; padding: 6px 10px; gap: 3px; }
+    /* v1.9.17: hcol-head sticky below the two-strip stack.
+       top = topbar(49) + baseline(~36) + objects(~64) ≈ 149 */
+    .pmp18-hcol-head { top: 149px; padding: 6px 10px; gap: 3px; }
 
-    /* Default mobile: stacked. User can switch to side via toolbar. */
+    /* Default mobile: stacked. v1.9.17: NO internal scroll — let the whole
+       page scroll so the other column is reachable by swiping down. */
     .pmp18-focus-wrap {
         flex-direction: column;
         padding: 6px 10px 8px;
@@ -1444,11 +1452,11 @@ mark.pmp18-share {
         border-right: 1px solid rgba(127,127,127,.16);
     }
     .pmp18-focus-wrap .pmp18-hcol-body {
-        max-height: 50vh;
-        overflow-y: auto;
+        max-height: none;
+        overflow: visible;
     }
 
-    /* 'side' mode: keep side-by-side even on mobile */
+    /* 'side' mode: keep side-by-side even on mobile (internal scroll) */
     .pmp18-compare-workspace.is-side .pmp18-focus-wrap {
         flex-direction: row;
         overflow: hidden;
@@ -1460,11 +1468,13 @@ mark.pmp18-share {
         width: auto;
         margin-bottom: 0;
     }
-    .pmp18-compare-workspace.is-side .pmp18-hcol-body { max-height: 55vh; font-size: 11px; }
+    .pmp18-compare-workspace.is-side .pmp18-hcol-body { max-height: 55vh; overflow-y: auto; font-size: 11px; }
     .pmp18-compare-workspace.is-side .pmp18-pair-person span { display: none; }
 }
 
 @media (max-width: 360px) {
-    .pmp18-obj-card { min-width: 95px; max-width: 120px; height: 70px; }
-    .pmp18-obj-card .pmp18-avatar { width: 32px; height: 32px; flex: 0 0 32px; }
+    .pmp18-obj-card { min-width: 88px; max-width: 110px; height: 48px; }
+    .pmp18-obj-card .pmp18-avatar { width: 26px; height: 26px; flex: 0 0 26px; }
+    .pmp18-objects-strip { min-height: 58px; }
+    .pmp18-hcol-head { top: 143px; }
 }

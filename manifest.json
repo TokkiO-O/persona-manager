@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.9.16",
+  "version": "1.9.17",
   "description": "版本号可点开更新日志；自动检查并显示 NEW；弹窗实心底框。",
   "hooks": {
     "update": "onUpdate"

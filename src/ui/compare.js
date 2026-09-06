@@ -117,6 +117,8 @@ export function renderCompareWorkspace(personas) {
                 <div class="pmp18-objects-scroll">${objectCards}</div>
             </div>
 
+            ${renderCompareLegend(fragmentMode, shortMode)}
+
             ${fragmentMode ? frag.sharePanel : ''}
 
             <div class="pmp18-focus-wrap ${mode}">
@@ -145,8 +147,6 @@ export function renderCompareWorkspace(personas) {
                     <div class="pmp18-hcol-body">${otherBody}</div>
                 </section>
             </div>
-
-            ${renderCompareLegend(fragmentMode, shortMode)}
 
             ${renderTocPanel(fragmentMode, shortMode, base.description, other.description)}
         </div>`;
