@@ -356,7 +356,6 @@ body.pmp18-open {
     inset: 0;
     z-index: 100000;
     isolation: isolate;
-    /* 不向 ST 泄漏主题：不在 body/html 上写背景色 */
     background: transparent;
     pointer-events: none;
 }
@@ -2896,3 +2895,54 @@ mark.pmp18-flash, .pmp18-flash {
     }
 }
 
+
+
+/* ===== Fullscreen shell (from working main + mobile full bleed) ===== */
+@media (max-width: 900px) {
+    #pmp18-root:not([hidden]) {
+        z-index: 100000;
+    }
+    .pmp18-window {
+        inset: 0 !important;
+        top: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+}
+@media (min-width: 901px) {
+    .pmp18-window {
+        inset: 1.5vh 2vw !important;
+    }
+}
+
+
+/* update overlay center in visible area */
+.pmp18-update-overlay {
+    position: absolute !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px !important;
+    box-sizing: border-box !important;
+    z-index: 500 !important;
+}
+#pmp18-root > .pmp18-update-overlay {
+    position: absolute !important;
+}
+body > .pmp18-update-overlay {
+    position: fixed !important;
+    z-index: 2147483646 !important;
+}
+.pmp18-update-modal {
+    border-radius: 16px !important;
+    max-width: min(420px, calc(100vw - 48px)) !important;
+    max-height: min(70vh, 70dvh) !important;
+}
