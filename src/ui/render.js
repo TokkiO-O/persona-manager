@@ -121,12 +121,14 @@ export function renderManager() {
                     <header class="pmp18-header">
                         <div class="pmp18-brand">
                             <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
-                            <div><h1>Persona Manager</h1>
-                            <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}</button>
+                            <div>
+                                <h1>Persona Manager</h1>
+                                <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}</button>
+                            </div>
                         </div>
+                        <div class="pmp18-header-actions">
+                            <button class="pmp18-icon-btn pmp18-close" type="button" data-action="close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
                         </div>
-                        <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
-                        <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
                     </header>
                     <main class="pmp18-content" style="padding:24px">
                         <div class="pmp18-empty" style="min-height:200px;text-align:left;align-items:flex-start">
@@ -188,12 +190,15 @@ export function renderManagerInner() {
             <header class="pmp18-header">
                 <div class="pmp18-brand">
                     <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
-                    <div><h1>Persona Manager</h1>
-                            <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}</button>
-                        </div>
+                    <div>
+                        <h1>Persona Manager</h1>
+                        <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}</button>
+                    </div>
                 </div>
-                <button class="pmp18-small-btn" type="button" data-action="refresh-list" title="刷新人设列表"><i class="fa-solid fa-rotate"></i></button>
-                <button class="pmp18-close" type="button" data-action="close"><i class="fa-solid fa-xmark"></i></button>
+                <div class="pmp18-header-actions">
+                    <button class="pmp18-icon-btn" type="button" data-action="refresh-list" title="刷新人设列表" aria-label="刷新"><i class="fa-solid fa-rotate"></i></button>
+                    <button class="pmp18-icon-btn pmp18-close" type="button" data-action="close" title="关闭" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+                </div>
             </header>
             ${inCompare ? `<main class="pmp18-content pmp18-content--compare">${renderCompareWorkspace(personas)}</main>` : `
             <div class="pmp18-toolbar">
@@ -207,6 +212,7 @@ export function renderManagerInner() {
                     <span><b>${sameNameGroups.length}</b> 同名</span>
                     <span><b>${duplicateGroups.length}</b> 重复</span>
                     ${state.tab === 'similar' ? `<span><b>${similarCount}</b> 相似</span>` : ''}
+                    <button type="button" class="pmp18-density-btn" data-action="toggle-density" title="列表疏密">${state.listDensity === 'compact' ? '紧凑' : '舒适'}</button>
                 </div>
             </div>
             <nav class="pmp18-tabs">
@@ -230,6 +236,7 @@ export function renderManagerInner() {
         if (newTabBar) newTabBar.scrollLeft = savedTabScroll;
         // v1.9.15: fold long same blocks for mobile reading
         applyFoldDefaults(root);
+        bindGlobalKeys(root);
         if (focusKey) {
             const el = root.querySelector(`[data-pmp18-keep-focus="${CSS.escape(focusKey)}"]`);
             if (el) {
@@ -245,6 +252,48 @@ export function renderManagerInner() {
 // v1.9.15: fold long same blocks for mobile reading. Walk each hcol-body,
 // find runs of 3+ same-class blocks, mark all but the first as folded.
 // Idempotent: marks are reset on each render.
+
+function bindGlobalKeys(root) {
+    if (root.dataset.pmp18Keys) return;
+    root.dataset.pmp18Keys = '1';
+    document.addEventListener('keydown', (e) => {
+        if (!state.active) return;
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+        if (e.key === 'Escape') {
+            if (state.compareIds.length >= 2) {
+                state.compareIds = [];
+                state.baselineId = null;
+                state.focusOtherId = null;
+                renderManager();
+            } else {
+                closeManager();
+            }
+            e.preventDefault();
+            return;
+        }
+        if (state.compareIds.length >= 2 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            const ids = state.compareIds.filter(id => id !== state.baselineId);
+            if (!ids.length) return;
+            let idx = ids.indexOf(state.focusOtherId);
+            if (idx < 0) idx = 0;
+            else idx = e.key === 'ArrowRight' ? (idx + 1) % ids.length : (idx - 1 + ids.length) % ids.length;
+            state.focusOtherId = ids[idx];
+            renderManager();
+            e.preventDefault();
+            return;
+        }
+        if (e.key === 'Enter' && state.selected.size >= 2 && state.compareIds.length < 2) {
+            state.compareIds = [...state.selected];
+            state.baselineId = state.compareIds[0];
+            state.focusOtherId = null;
+            state.compareChromeOpen = false;
+            renderManager();
+            e.preventDefault();
+        }
+    });
+}
+
 function applyFoldDefaults(root) {
     const FOLD_MIN = 3;
     const bodies = root.querySelectorAll('.pmp18-hcol-body');
@@ -307,6 +356,18 @@ export function ensureRoot() {
             openFullEditor(id);
         }
     });
+
+    root.addEventListener('pointerup', event => {
+        const vbtn = event.target.closest('[data-action="open-update-modal"]');
+        if (!vbtn || !root.contains(vbtn)) return;
+        if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+            event.preventDefault();
+            event.stopPropagation();
+            root.dataset.pmp18SkipVersionClick = '1';
+            try { showUpdateModal(); } catch (err) { console.error(err); }
+            setTimeout(() => { delete root.dataset.pmp18SkipVersionClick; }, 400);
+        }
+    }, { passive: false });
 
     root.addEventListener('click', event => {
         const target = event.target.closest('[data-action]');
@@ -440,6 +501,39 @@ export function ensureRoot() {
             handleTocJump(target);
             return;
         }
+        
+        if (action === 'toggle-density') {
+            state.listDensity = state.listDensity === 'compact' ? 'comfy' : 'compact';
+            renderManager();
+            return;
+        }
+        if (action === 'toggle-group-fold') {
+            const key = String(target.dataset.key || '');
+            state.groupFold[key] = !state.groupFold[key];
+            renderManager();
+            return;
+        }
+        if (action === 'jump-share') {
+            const snip = String(target.dataset.snippet || '').trim();
+            if (!snip) return;
+            const rootEl = document.getElementById(ROOT_ID);
+            const scope = rootEl?.querySelector('.pmp18-multi-base-body, .pmp18-multi-other-card.is-focus .pmp18-multi-other-body') || rootEl;
+            const marks = scope?.querySelectorAll('mark') || [];
+            let found = null;
+            const head = snip.slice(0, Math.min(12, snip.length));
+            for (const m of marks) {
+                if ((m.textContent || '').includes(head) || head.includes((m.textContent || '').slice(0, 6))) {
+                    found = m; break;
+                }
+            }
+            if (found) {
+                found.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                found.classList.add('pmp18-flash');
+                setTimeout(() => found.classList.remove('pmp18-flash'), 1200);
+            }
+            return;
+        }
+
         if (action === 'toggle-diff-only') {
             state.settings.showDiffOnly = !state.settings.showDiffOnly;
             saveSettingsLocal();
@@ -517,7 +611,15 @@ export function ensureRoot() {
             return;
         }
         if (action === 'open-update-modal') {
-            showUpdateModal();
+            if (root.dataset.pmp18SkipVersionClick) return;
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                showUpdateModal();
+            } catch (err) {
+                console.error('[Persona Manager] open update modal failed', err);
+                if (typeof toastr !== 'undefined') toastr.error('无法打开更新窗口');
+            }
             return;
         }
         if (action === 'check-update') {

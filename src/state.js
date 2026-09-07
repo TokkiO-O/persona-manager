@@ -22,10 +22,12 @@ export const state = {
     settings: loadSettings(),
     updateInfo: null,
     // v1.9.15: compare view UI state (not persisted, session-only)
-    viewMode: 'stacked',   // 'stacked' | 'side' — 手机默认上下；宽屏可左右
+    viewMode: 'side',      // 'stacked' | 'side' — 默认左右；窄屏仍强制上下
     showToc: false,
     tocQuery: '',
-    compareChromeOpen: false, // 移动端对比顶区是否展开
+    compareChromeOpen: false, // 工具区是否展开
+    listDensity: 'comfy', // 'comfy' | 'compact'
+    groupFold: {}, // groupKey -> true if folded
 };
 
 export function saveSettingsLocal() {

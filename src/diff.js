@@ -351,7 +351,7 @@ export function renderFragmentCompare(baseText, otherText, opts = {}) {
     const shortMode = !!opts.shortMode;
     const shared = extractSharedSnippets(baseText, otherText, { shortMode });
     const shareHtml = shared.length
-        ? `<div class="pmp18-share-list">${shared.map(s => `<span class="pmp18-share-chip">${escapeHtml(s)}</span>`).join('')}</div>`
+        ? `<div class="pmp18-share-list">${shared.map(s => `<button type="button" class="pmp18-share-chip" data-action="jump-share" data-snippet="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
         : `<div class="pmp18-muted">未抽出可对齐的共同短句/数字（结构差异较大时属正常）</div>`;
 
     return {

@@ -110,7 +110,10 @@ export function renderCompareWorkspace(personas) {
     }).join('');
 
     // Horizontal full-text cards for every other
-    const otherFullCards = others.map(id => {
+    const othersOrdered = focusId
+        ? [focusId, ...others.filter(id => id !== focusId)]
+        : others.slice();
+    const otherFullCards = othersOrdered.map(id => {
         const p = personas.find(x => x.id === id);
         if (!p) return '';
         const sc = similarity(base.description, p.description);
@@ -147,10 +150,10 @@ export function renderCompareWorkspace(personas) {
     }).join('');
 
     const isNarrow = typeof window !== 'undefined' && window.innerWidth <= 900;
-    // 窄屏强制上下全文；宽屏才允许左右
-    const viewMode = (!isNarrow && state.viewMode === 'side') ? 'side' : 'stacked';
+    // 用户可选手动切换；默认 state.viewMode（桌面 side，可改）
+    const viewMode = state.viewMode === 'side' ? 'side' : 'stacked';
     const viewModeClass = `is-${viewMode}`;
-    const chromeOpen = isNarrow ? !!state.compareChromeOpen : true;
+    const chromeOpen = !!state.compareChromeOpen; // 桌面/手机默认收起，点「详情」展开
     const pairLabel = focusPersona
         ? `${base.name} ↔ ${focusPersona.name}`
         : `${base.name} · 待选对象`;
@@ -164,6 +167,7 @@ export function renderCompareWorkspace(personas) {
                     <span class="pmp18-compact-sub">${escapeHtml(formatPersonaSubline(base))}</span>
                     ${focusPersona ? `<span class="pmp18-detail-vs">↔</span><strong>${escapeHtml(focusPersona.name)}</strong><span class="pmp18-compact-sub">${escapeHtml(formatPersonaSubline(focusPersona))}</span>` : `<span class="pmp18-muted">· 点选对象</span>`}
                 </div>
+                <button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${viewMode === 'side' ? '↕' : '↔'}</button>
                 <button type="button" class="pmp18-small-btn ${chromeOpen ? 'is-on' : ''}" data-action="toggle-compare-chrome" title="展开/收起工具区">${chromeOpen ? '收起' : '详情'}</button>
             </div>
 
@@ -176,28 +180,32 @@ export function renderCompareWorkspace(personas) {
                     <div class="pmp18-compare-tools">
                         <button type="button" class="pmp18-small-btn ${state.showToc ? 'is-on' : ''}" data-action="toggle-toc" title="目录与搜索"><i class="fa-solid fa-list"></i></button>
                         ${fragmentMode && focusPersona ? '' : `<button type="button" class="pmp18-small-btn ${showDiffOnly ? 'is-on' : ''}" data-action="toggle-diff-only">只看差异</button>`}
-                        ${isNarrow ? '' : `<button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${viewMode === 'side' ? '↕ 上下' : '↔ 左右'}</button>`}
+                        <button type="button" class="pmp18-small-btn" data-action="set-view-mode" data-mode="${viewMode === 'side' ? 'stacked' : 'side'}" title="切换上下/左右">${viewMode === 'side' ? '↕ 上下' : '↔ 左右'}</button>
                         <button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(base.id)}">编辑基准</button>
                         ${focusPersona ? `<button type="button" class="pmp18-small-btn" data-action="edit-full" data-id="${escapeHtml(focusPersona.id)}">编辑对方</button>` : ''}
                     </div>
                 </div>
 
-                <div class="pmp18-sticky-wrap">
-                    <div class="pmp18-baseline-strip">
-                        <span class="pmp18-strip-label">基准</span>
-                        <div class="pmp18-baseline-scroll">${baselineCards}</div>
-                    </div>
-                    <div class="pmp18-objects-strip">
-                        <span class="pmp18-strip-label">对象</span>
-                        <div class="pmp18-objects-scroll">${objectCards}</div>
-                    </div>
+                <div class="pmp18-chrome-tools-hint">
+                    <span class="pmp18-muted" style="font-size:11px">换基准 / 选对象：点下方卡片或此处芯片</span>
                 </div>
+                <div class="pmp18-chip-row">
+                    <span class="pmp18-strip-label">基准</span>
+                    <div class="pmp18-chip-scroll">${baselineCards}</div>
+                </div>
+                <div class="pmp18-chip-row">
+                    <span class="pmp18-strip-label">对象</span>
+                    <div class="pmp18-chip-scroll">${objectCards}</div>
+                </div>
+            </div>
 
+            <div class="pmp18-compare-always">
+                <div class="pmp18-detail-meta pmp18-progress-line">
+                    <span class="pmp18-detail-score">${metaLine}</span>
+                    <span class="pmp18-progress-dots">${others.length ? `对象 ${focusId ? (others.indexOf(focusId) + 1) : '—'} / ${others.length}` : ''}</span>
+                </div>
                 ${renderCompareLegend(fragmentMode && !!focusPersona, shortMode)}
                 ${sharePanel}
-                <div class="pmp18-detail-meta">
-                    <span class="pmp18-detail-score">${metaLine}</span>
-                </div>
             </div>
 
             <div class="pmp18-multi-body ${mode}">
@@ -217,6 +225,12 @@ export function renderCompareWorkspace(personas) {
                     ${otherFullCards || '<div class="pmp18-muted" style="padding:16px">无对象</div>'}
                 </div>
             </div>
+            ${isNarrow && others.length ? `<div class="pmp18-mobile-thumbs" data-pmp18-hscroll="1">${othersOrdered.map(id => {
+                const p = personas.find(x => x.id === id);
+                if (!p) return '';
+                const on = id === focusId;
+                return `<button type="button" class="pmp18-thumb ${on ? 'is-on' : ''}" data-action="set-focus-other" data-id="${escapeHtml(id)}">${renderAvatar(p)}<span>${escapeHtml(p.name)}</span></button>`;
+            }).join('')}</div>` : ''}
 
             ${focusPersona ? renderTocPanel(fragmentMode, shortMode, base.description, focusPersona.description) : ''}
         </div>`;

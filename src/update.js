@@ -1,4 +1,4 @@
-import { EXT, VERSION, REMOTE_MANIFEST_URLS, REMOTE_CHANGELOG_URLS } from './constants.js';
+import { EXT, VERSION, ROOT_ID, REMOTE_MANIFEST_URLS, REMOTE_CHANGELOG_URLS } from './constants.js';
 import { state } from './state.js';
 import { escapeHtml, isRemoteNewer, compareSemver } from './util.js';
 
@@ -236,53 +236,74 @@ export function extractChangelogForVersion(md, version) {
 }
 
 export async function showUpdateModal() {
-    // Silent re-fetch: update state only, do not flip settings panel into「正在检查」
-    try {
-        await checkForUpdates({ silent: true });
-    } catch (e) {
-        console.warn(`[${EXT}] modal re-fetch failed`, e);
-    }
-    const info = state.updateInfo || {};
-    const log = extractChangelogForVersion(info.changelog || '', info.remoteVersion || VERSION);
-    const available = Boolean(info.available);
+    // 立刻弹出，避免手机端等网络像「点了没反应」
+    document.querySelectorAll('.pmp18-update-overlay').forEach(el => el.remove());
+
     const overlay = document.createElement('div');
-    overlay.className = 'pmp18-editor-overlay pmp18-update-overlay';
-    overlay.innerHTML = `
+    overlay.className = 'pmp18-update-overlay';
+    overlay.setAttribute('data-pmp18-update', '1');
+
+    const paint = (info = {}) => {
+        const log = extractChangelogForVersion(info.changelog || '', info.remoteVersion || VERSION);
+        const available = Boolean(info.available);
+        const checking = Boolean(info.checking);
+        const err = info.error ? String(info.error) : '';
+        overlay.innerHTML = `
         <div class="pmp18-update-modal" role="dialog" aria-modal="true">
             <header class="pmp18-update-modal-header">
-                <strong>${available ? '发现新版本' : '更新日志'}</strong>
+                <strong>${checking ? '正在检查更新…' : (available ? '发现新版本' : '更新日志')}</strong>
                 <button type="button" class="pmp18-update-modal-x" data-close aria-label="关闭">×</button>
             </header>
             <div class="pmp18-update-modal-body">
                 <p class="pmp18-update-modal-meta">当前 <b>v${VERSION}</b>${info.remoteVersion ? ` · 远程 <b>v${escapeHtml(String(info.remoteVersion))}</b>` : ''}</p>
-                <pre class="pmp18-changelog">${escapeHtml(log || '（无日志）')}</pre>
+                ${err ? `<p class="pmp18-update-err">${escapeHtml(err)}</p>` : ''}
+                <pre class="pmp18-changelog">${escapeHtml(checking ? '正在拉取更新日志…' : (log || '（无日志）'))}</pre>
             </div>
             <footer class="pmp18-update-modal-footer">
                 <button type="button" class="pmp18-small-btn" data-close>关闭</button>
-                ${available ? '<button type="button" class="pmp18-primary-btn" data-do-update>更新</button>' : ''}
+                ${available && !checking ? '<button type="button" class="pmp18-primary-btn" data-do-update>更新</button>' : ''}
             </footer>
         </div>`;
-    const close = () => overlay.remove();
-    overlay.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = close; });
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    const doBtn = overlay.querySelector('[data-do-update]');
-    if (doBtn) {
-        doBtn.onclick = async () => {
-            doBtn.disabled = true;
-            doBtn.textContent = '更新中…';
-            try {
-                await callExtensionUpdate();
-                doBtn.textContent = '完成，正在刷新…';
-                setTimeout(() => location.reload(), 500);
-            } catch (e) {
-                doBtn.disabled = false;
-                doBtn.textContent = '更新';
-                if (typeof toastr !== 'undefined') toastr.error(`更新失败：${e?.message || e}`);
-                console.error(`[${EXT}] update failed`, e);
-            }
-        };
+        const close = () => overlay.remove();
+        overlay.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = close; });
+        const doBtn = overlay.querySelector('[data-do-update]');
+        if (doBtn) {
+            doBtn.onclick = async () => {
+                doBtn.disabled = true;
+                doBtn.textContent = '更新中…';
+                try {
+                    await callExtensionUpdate();
+                    doBtn.textContent = '完成，正在刷新…';
+                    setTimeout(() => location.reload(), 500);
+                } catch (e) {
+                    doBtn.disabled = false;
+                    doBtn.textContent = '更新';
+                    if (typeof toastr !== 'undefined') toastr.error(`更新失败：${e?.message || e}`);
+                    console.error(`[${EXT}] update failed`, e);
+                }
+            };
+        }
+    };
+
+    paint({ ...(state.updateInfo || {}), checking: true });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    // 挂到扩展根节点，避免被 ST 手机顶栏层/堆叠上下文盖住；无根时再挂 body
+    const host = document.getElementById(ROOT_ID) || document.body;
+    host.appendChild(overlay);
+
+    try {
+        await checkForUpdates({ silent: true });
+        if (!overlay.isConnected) return;
+        paint({ ...(state.updateInfo || {}), checking: false });
+    } catch (e) {
+        console.warn(`[${EXT}] modal re-fetch failed`, e);
+        if (!overlay.isConnected) return;
+        paint({
+            ...(state.updateInfo || {}),
+            checking: false,
+            error: `无法拉取更新：${e?.message || e}`,
+        });
     }
-    document.body.appendChild(overlay);
 }
 
 export function scheduleAutoUpdateCheck() {
