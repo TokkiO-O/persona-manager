@@ -1,11 +1,12 @@
 import { getPersonaData, persistPersonaFull } from '../persona-data.js';
-import { escapeHtml } from '../util.js';
+import { escapeHtml, computeReadableInk } from '../util.js';
 import { EXT } from '../constants.js';
+import { state } from '../state.js';
 
 let _afterSave = () => {};
 export function setEditorAfterSave(fn) { _afterSave = typeof fn === 'function' ? fn : () => {}; }
 
-/* ---------- Editor (id locked at open) ---------- */
+/* ---------- 编辑器（打开时锁定 id，防串改） ---------- */
 
 export function openFullEditor(rawId) {
     const id = String(rawId || '');
@@ -18,7 +19,8 @@ export function openFullEditor(rawId) {
     const lockedId = p.id;
 
     const overlay = document.createElement('div');
-    overlay.className = 'pmp18-editor-overlay';
+    const mode = state.settings?.editorMode === 'fullscreen' ? 'fullscreen' : 'popup';
+    overlay.className = `pmp18-editor-overlay is-${mode}`;
     overlay.dataset.editId = lockedId;
     overlay.innerHTML = `
         <div class="pmp18-editor">
@@ -38,7 +40,43 @@ export function openFullEditor(rawId) {
             <p class="pmp18-editor-note">仅写入 ID：${escapeHtml(lockedId)}，不会修改其他人设。</p>
         </div>`;
 
-    const close = () => overlay.remove();
+    // 键盘弹起时用 visualViewport 收紧弹窗高度，保证底部按钮可见
+    let cleanupViewportFit = () => {};
+    const ed = overlay.querySelector('.pmp18-editor');
+    // 与卡片一致：按实际渲染背景亮度钉住可读文本色，避免深色主题下
+    // BlurTint 缺失（白兜底）时白底白字。编辑器挂在 body 下，不继承
+    // #pmp18-root 上的 --pmp18-ink，需就地计算。
+    ed.style.setProperty('--pmp18-ink', computeReadableInk(getComputedStyle(ed).backgroundColor));
+    if (mode === 'fullscreen') {
+        overlay.style.setProperty('padding', '0', 'important');
+        ed.style.setProperty('width', '100%', 'important');
+        ed.style.setProperty('height', '100%', 'important');
+        ed.style.setProperty('height', '100dvh', 'important');
+        ed.style.setProperty('max-height', '100dvh', 'important');
+        ed.style.setProperty('max-width', '100%', 'important');
+        ed.style.setProperty('border-radius', '0', 'important');
+        ed.style.setProperty('margin', '0', 'important');
+    } else if (window.visualViewport) {
+        let raf = 0;
+        const fit = () => {
+            const vh = window.visualViewport.height;
+            const maxH = Math.min(vh - 16, 640);
+            ed.style.setProperty('max-height', `${maxH}px`, 'important');
+        };
+        const onResize = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
+        fit();
+        window.visualViewport.addEventListener('resize', onResize);
+        cleanupViewportFit = () => {
+            cancelAnimationFrame(raf);
+            window.visualViewport.removeEventListener('resize', onResize);
+            ed.style.removeProperty('max-height');
+        };
+    }
+
+    const close = () => {
+        cleanupViewportFit();
+        overlay.remove();
+    };
     overlay.querySelector('.pmp18-editor-close').onclick = close;
     overlay.querySelector('.pmp18-editor-cancel').onclick = close;
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });

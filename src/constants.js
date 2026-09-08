@@ -1,7 +1,7 @@
 /** Shared constants for Persona Manager */
 
 export const EXT = 'Persona Manager';
-export const VERSION = '1.9.25';
+export const VERSION = '1.10.1';
 export const ROOT_ID = 'pmp18-root';
 export const BUTTON_ID = 'pmp18-entry';
 export const ENTRY_MARK = 'pmp18-entry-installed';
@@ -47,11 +47,13 @@ export const COMMON_STOPWORDS = new Set([
     'kg', 'cm', 'mm', '岁', '年', '月', '日',
 ]);
 
+/** editorMode: 'popup' | 'fullscreen' */
 export const defaultSettings = {
     similarityThreshold: 0.55,
     includeSameNameInSimilar: true,
     showDiffOnly: false,
     softMatchThreshold: 0.35,
+    editorMode: 'popup',
 };
 
 /** Below this total char count for BOTH sides, treat as "short persona":

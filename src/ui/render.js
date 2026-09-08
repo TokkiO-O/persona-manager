@@ -1,6 +1,6 @@
 import { EXT, VERSION, ROOT_ID } from '../constants.js';
 import { state, saveSettingsLocal } from '../state.js';
-import { escapeHtml } from '../util.js';
+import { escapeHtml, computeReadableInk } from '../util.js';
 import {
     getPersonaData, deletePersonaById, confirmDeletePersona, invalidatePersonaCache, syncPersonasFromAvatarFiles
 } from '../persona-data.js';
@@ -24,6 +24,7 @@ export function tabButton(key, label, icon, count) {
 export function renderSettingsPanel() {
     const t = Math.round(state.settings.similarityThreshold * 100);
     const soft = Math.round((state.settings.softMatchThreshold ?? 0.35) * 100);
+    const editorMode = state.settings.editorMode === 'fullscreen' ? 'fullscreen' : 'popup';
     const upd = state.updateInfo;
     let tip = '';
     if (upd?.available) {
@@ -48,6 +49,14 @@ export function renderSettingsPanel() {
                     <input type="checkbox" id="pmp18-same-name" ${state.settings.includeSameNameInSimilar ? 'checked' : ''}>
                     同名也参与「高度相似」检测
                 </label>
+            </div>
+            <div class="pmp18-settings-row">
+                <label>编辑框样式</label>
+                <div class="pmp18-mode-switch" role="group" aria-label="编辑框样式">
+                    <button type="button" class="pmp18-mode-opt ${editorMode === 'popup' ? 'is-on' : ''}" data-action="set-editor-mode" data-mode="popup">弹窗</button>
+                    <button type="button" class="pmp18-mode-opt ${editorMode === 'fullscreen' ? 'is-on' : ''}" data-action="set-editor-mode" data-mode="fullscreen">全屏</button>
+                </div>
+                <div class="pmp18-muted" style="margin-top:6px;font-size:12px">弹窗：居中圆角留白 · 全屏：铺满屏幕</div>
             </div>
         </div>`;
 }
@@ -237,6 +246,7 @@ export function renderManagerInner() {
         // v1.9.15: fold long same blocks for mobile reading
         applyFoldDefaults(root);
         bindGlobalKeys(root);
+        applyAdaptiveInk(root);
         if (focusKey) {
             const el = root.querySelector(`[data-pmp18-keep-focus="${CSS.escape(focusKey)}"]`);
             if (el) {
@@ -248,6 +258,36 @@ export function renderManagerInner() {
         }
     });
 }
+
+/**
+ * Guarantee readable text on surfaces whose background comes from ST theme
+ * variables. ST pairs --SmartThemeBodyColor with --SmartThemeBlurTintColor
+ * only for well-formed themes; when the blur tint is missing (falls back to
+ * white) while BodyColor is white (dark theme), text vanishes. Compute the
+ * actual rendered background luminance and pin the ink color (dark on light,
+ * light on dark), mirroring ST's own --SmartThemeCheckboxTickColor approach.
+ */
+function applyAdaptiveInk(root) {
+    const windowEl = root.querySelector('.pmp18-window');
+    const windowBg = windowEl ? getComputedStyle(windowEl).backgroundColor : null;
+    const fallbackBg = windowBg || '#ffffff';
+    const ink = computeReadableInk(windowBg, fallbackBg);
+    root.style.setProperty('--pmp18-ink', ink);
+    // 列表文字被主题盖成白字时，渲染后强制改回深色
+    root.querySelectorAll('.pmp18-card-name').forEach(el => {
+        el.style.setProperty('color', '#1a1a1f', 'important');
+        el.style.setProperty('-webkit-text-fill-color', '#1a1a1f', 'important');
+    });
+    root.querySelectorAll('.pmp18-card-description').forEach(el => {
+        el.style.setProperty('color', '#333333', 'important');
+        el.style.setProperty('-webkit-text-fill-color', '#333333', 'important');
+    });
+    root.querySelectorAll('.pmp18-card-sub').forEach(el => {
+        el.style.setProperty('color', '#666666', 'important');
+        el.style.setProperty('-webkit-text-fill-color', '#666666', 'important');
+    });
+}
+
 
 // v1.9.15: fold long same blocks for mobile reading. Walk each hcol-body,
 // find runs of 3+ same-class blocks, mark all but the first as folded.
@@ -329,7 +369,7 @@ function applyFoldDefaults(root) {
 }
 
 
-/* ---------- Root events ---------- */
+/* ---------- 根节点事件委托 ---------- */
 
 export function ensureRoot() {
     let root = document.getElementById(ROOT_ID);
@@ -350,6 +390,9 @@ export function ensureRoot() {
         const id = String(target.dataset.id2 || target.dataset.id || '');
         if (!id) return;
         if (action === 'edit-full') {
+            // Cancel any pending deferred focus-reorder so it never fires after the editor opens
+            clearTimeout(root._pmp18FocusTimer);
+            clearTimeout(root._pmp18BaselineTimer);
             // Don't bubble to click handler (which would set baseline / focus other)
             event.preventDefault();
             event.stopPropagation();
@@ -462,17 +505,49 @@ export function ensureRoot() {
         }
         if (action === 'set-baseline') {
             const id = String(target.dataset.id);
-            state.baselineId = id;
-            if (state.focusOtherId === id) state.focusOtherId = null;
-            // focus may still be valid if it remains in others
-            if (state.focusOtherId && state.focusOtherId === id) state.focusOtherId = null;
-            renderManager();
+            // A real double-click reorders the DOM on the first click, which would
+            // make the second click land on a different element and suppress the
+            // browser's dblclick. Defer the re-render so a fast second click can
+            // still be recognized as a double-click (handled by the dblclick path).
+            if (event.detail >= 2) {
+                clearTimeout(root._pmp18BaselineTimer);
+                return;
+            }
+            clearTimeout(root._pmp18BaselineTimer);
+            root._pmp18BaselineTimer = setTimeout(() => {
+                delete root._pmp18BaselineTimer;
+                if (!state.active || root.hidden) return;
+                state.baselineId = id;
+                if (state.focusOtherId === id) state.focusOtherId = null;
+                // focus may still be valid if it remains in others
+                if (state.focusOtherId && state.focusOtherId === id) state.focusOtherId = null;
+                renderManager();
+            }, 280);
             return;
         }
         if (action === 'set-focus-other') {
             const id = String(target.dataset.id);
-            state.focusOtherId = (state.focusOtherId === id) ? null : id;
-            renderManager();
+            // Cards that also carry data-dblaction must defer the focus-toggle +
+            // re-render, otherwise the first click reorders the DOM under the
+            // cursor and the browser's native dblclick never fires on the second
+            // click (it lands on a different element). Mobile thumbs have no
+            // dblaction, so keep their single-click focus immediate.
+            if (target.closest('[data-dblaction]')) {
+                if (event.detail >= 2) {
+                    clearTimeout(root._pmp18FocusTimer);
+                    return;
+                }
+                clearTimeout(root._pmp18FocusTimer);
+                root._pmp18FocusTimer = setTimeout(() => {
+                    delete root._pmp18FocusTimer;
+                    if (!state.active || root.hidden) return;
+                    state.focusOtherId = (state.focusOtherId === id) ? null : id;
+                    renderManager();
+                }, 280);
+            } else {
+                state.focusOtherId = (state.focusOtherId === id) ? null : id;
+                renderManager();
+            }
             return;
         }
         if (action === 'set-view-mode') {
@@ -502,6 +577,13 @@ export function ensureRoot() {
             return;
         }
         
+        if (action === 'set-editor-mode') {
+            const mode = String(target.getAttribute('data-mode') || target.dataset.mode || 'popup') === 'fullscreen' ? 'fullscreen' : 'popup';
+            state.settings.editorMode = mode;
+            saveSettingsLocal();
+            renderManager();
+            return;
+        }
         if (action === 'toggle-density') {
             state.listDensity = state.listDensity === 'compact' ? 'comfy' : 'compact';
             renderManager();
@@ -517,19 +599,26 @@ export function ensureRoot() {
             const snip = String(target.dataset.snippet || '').trim();
             if (!snip) return;
             const rootEl = document.getElementById(ROOT_ID);
-            const scope = rootEl?.querySelector('.pmp18-multi-base-body, .pmp18-multi-other-card.is-focus .pmp18-multi-other-body') || rootEl;
-            const marks = scope?.querySelectorAll('mark') || [];
-            let found = null;
-            const head = snip.slice(0, Math.min(12, snip.length));
-            for (const m of marks) {
-                if ((m.textContent || '').includes(head) || head.includes((m.textContent || '').slice(0, 6))) {
-                    found = m; break;
-                }
-            }
-            if (found) {
-                found.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                found.classList.add('pmp18-flash');
-                setTimeout(() => found.classList.remove('pmp18-flash'), 1200);
+            if (!rootEl) return;
+            const marks = Array.from(rootEl.querySelectorAll('mark.pmp18-share, mark'));
+            const matched = marks.filter(m => {
+                const t = (m.textContent || '').replace(/\s+/g, ' ').trim();
+                return t === snip || t.includes(snip) || snip.includes(t);
+            });
+            if (!matched.length) return;
+            matched.forEach(m => {
+                m.classList.add('pmp18-toc-flash');
+                m.classList.add('pmp18-flash');
+                setTimeout(() => {
+                    m.classList.remove('pmp18-toc-flash');
+                    m.classList.remove('pmp18-flash');
+                }, 3200);
+            });
+            const inOther = matched.find(m => m.closest('.pmp18-multi-other-card, .pmp18-other-col, .pmp18-obj-card'));
+            const inBase = matched.find(m => m.closest('.pmp18-multi-base-fixed, .pmp18-base-col, .pmp18-base-card'));
+            (inOther || matched[matched.length - 1]).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            if (inBase && inBase !== inOther) {
+                try { inBase.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch { /* ignore */ }
             }
             return;
         }
@@ -713,15 +802,33 @@ function handleTocJump(target) {
         const candidates = Array.from(blocks);
         sel = candidates[idx] || null;
     } else if (jump.startsWith('share-')) {
-        // find the mark with this snippet text
-        const marks = root.querySelectorAll('.pmp18-col-block.frag mark.pmp18-share');
+        // 按芯片文案匹配两侧所有 mark（不能只用 document 序的第 idx 个——那往往只在基准里）
+        const snippet = (target.textContent || '').replace(/\s+/g, ' ').trim();
+        const allMarks = Array.from(root.querySelectorAll('mark.pmp18-share'));
+        const matched = snippet
+            ? allMarks.filter(m => (m.textContent || '').replace(/\s+/g, ' ').trim() === snippet)
+            : [];
         const idx = parseInt(jump.slice(6), 10) || 0;
-        sel = marks[idx] || null;
+        if (matched.length) {
+            matched.forEach(m => {
+                m.classList.add('pmp18-toc-flash');
+                setTimeout(() => m.classList.remove('pmp18-toc-flash'), 3200);
+            });
+            // 优先滚到对象侧，再保证基准侧也在视野内
+            const inOther = matched.find(m => m.closest('.pmp18-multi-other-card, .pmp18-other-col, .pmp18-obj-card, [data-side="other"]'));
+            const inBase = matched.find(m => m.closest('.pmp18-multi-base-fixed, .pmp18-base-col, .pmp18-base-card, [data-side="base"]'));
+            (inOther || matched[matched.length - 1])?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            if (inBase && inBase !== inOther) {
+                try { inBase.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' }); } catch { /* ignore */ }
+            }
+            return;
+        }
+        sel = allMarks[idx] || null;
     }
     if (!sel) return;
     sel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     sel.classList.add('pmp18-toc-flash');
-    setTimeout(() => sel.classList.remove('pmp18-toc-flash'), 1500);
+    setTimeout(() => sel.classList.remove('pmp18-toc-flash'), 3200);
     // Also try to highlight search matches if any
     if (state.tocQuery) {
         const q = state.tocQuery.toLowerCase();
@@ -781,7 +888,11 @@ export function closeManager() {
     state.baselineId = null;
     state.focusOtherId = null;
     const root = document.getElementById(ROOT_ID);
-    if (root) root.hidden = true;
+    if (root) {
+        clearTimeout(root._pmp18FocusTimer);
+        clearTimeout(root._pmp18BaselineTimer);
+        root.hidden = true;
+    }
     document.body.classList.remove('pmp18-open');
 }
 

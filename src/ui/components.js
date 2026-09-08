@@ -17,6 +17,7 @@ export function renderAvatar(persona) {
         : `<div class="pmp18-avatar pmp18-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
 }
 
+
 function isInGroup(persona, groups) {
     return groups.some(g => g.some(item => item.id === persona.id));
 }
@@ -31,31 +32,36 @@ export function renderCard(persona, all) {
     const checked = state.selected.has(persona.id);
     const sub = formatPersonaSubline(persona);
     const dens = state.listDensity === 'compact';
-    const maxLen = dens ? 90 : 160;
+    const maxLen = dens ? 72 : 160;
     const raw = String(persona.description || '').replace(/\s+/g, ' ').trim();
     const desc = raw
         ? escapeHtml(raw.slice(0, maxLen)) + (raw.length > maxLen ? '…' : '')
         : '<span class="pmp18-muted">暂无描述</span>';
+    const id = escapeHtml(persona.id);
     return `
-        <article class="pmp18-card ${checked ? 'is-selected' : ''} density-${state.listDensity || 'comfy'}" data-persona-id="${escapeHtml(persona.id)}">
+        <article class="pmp18-card ${checked ? 'is-selected' : ''} density-${state.listDensity || 'comfy'}" data-persona-id="${id}">
             <label class="pmp18-check">
-                <input type="checkbox" data-action="select" data-id="${escapeHtml(persona.id)}" ${checked ? 'checked' : ''}>
+                <input type="checkbox" data-action="select" data-id="${id}" ${checked ? 'checked' : ''}>
             </label>
             ${renderAvatar(persona)}
             <div class="pmp18-card-main">
                 <div class="pmp18-card-title-row">
-                    <div class="pmp18-card-name">${escapeHtml(persona.name)}</div>
+                    <div class="pmp18-card-name" style="color:#1a1a1f;-webkit-text-fill-color:#1a1a1f">${escapeHtml(persona.name || '未命名')}</div>
                     ${statusBadge(persona, all)}
                 </div>
-                <div class="pmp18-card-sub" title="${escapeHtml(persona.title ? `备注：${persona.title}` : `ID：${persona.id}`)}">${escapeHtml(sub)}</div>
-                <div class="pmp18-card-description">${desc}</div>
+                <div class="pmp18-card-sub" style="color:#666;-webkit-text-fill-color:#666" title="${escapeHtml(persona.title ? `备注：${persona.title}` : `ID：${persona.id}`)}">${escapeHtml(sub)}</div>
+                <div class="pmp18-card-description" style="color:#333;-webkit-text-fill-color:#333">${desc}</div>
             </div>
             <div class="pmp18-card-actions">
-                <button type="button" class="pmp18-icon-btn" data-action="edit-full" data-id="${escapeHtml(persona.id)}" title="编辑"><i class="fa-solid fa-pen"></i></button>
-                <button type="button" class="pmp18-icon-btn pmp18-danger-icon" data-action="delete-persona" data-id="${escapeHtml(persona.id)}" title="删除"><i class="fa-solid fa-trash"></i></button>
+                <button type="button" class="pmp18-icon-btn" data-action="edit-full" data-id="${id}" title="编辑"><i class="fa-solid fa-pen"></i></button>
+                <button type="button" class="pmp18-icon-btn pmp18-danger-icon" data-action="delete-persona" data-id="${id}" title="删除"><i class="fa-solid fa-trash"></i></button>
             </div>
         </article>`;
 }
+
+
+
+
 
 export function renderGroup(group, title, all) {
     const key = String(title || group[0]?.name || 'g');

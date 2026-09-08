@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { escapeHtml, normalizeText } from './util.js';
 import { similarity } from './similarity.js';
 
-/* ---------- Diff engine ---------- */
+/* ---------- 对比 / 差异引擎 ---------- */
 
 /** Short heading line: section title, not a long prose sentence */
 export function isSectionTitleLine(line) {
@@ -240,55 +240,320 @@ export function looksStructured(text) {
  *  @param {object} [opts]
  *  @param {boolean} [opts.shortMode=false] relax length floor and skip a few stopwords
  */
+/* ---------- 共同片段：结构化字段 + 散文事实 统一抽取后对齐 ---------- */
+
+/** 字段名 → 规范键 */
+const FIELD_CANON_MAP = [
+    [['eyes', 'eye', 'eye color', 'eyecolor', 'eye_color', '瞳', '瞳色', '瞳孔', '眼睛', '眼珠', '虹膜', '眼色'], 'eye'],
+    [['hair', 'hair color', 'haircolor', 'hair_colour', '发型', '发色', '头发', '髮型', '髮色', '头发颜色', '发型与发色', '发长'], 'hair'],
+    [['skin', 'skin color', 'skincolour', '肤色', '皮肤', '肤'], 'skin'],
+    [['height', '身高', 'height_cm'], 'height'],
+    [['weight', '体重', 'weight_kg'], 'weight'],
+    [['gender', 'sex', '性别', 'gender_identity'], 'gender'],
+    [['age', '年龄', '年纪'], 'age'],
+    [['name', '姓名', '名字', '名称'], 'name'],
+    [['personality', '性格', 'personality_traits', '性情', '脾气'], 'personality'],
+    [['style', '风格', '气质', '人设风格'], 'style'],
+];
+
+const VALUE_SYNONYMS = [
+    [['棕色', '褐色', 'brown', 'Brunette'], 'brown'],
+    [['黑色', '黑', 'black'], 'black'],
+    [['白色', '白', 'white'], 'white'],
+    [['红色', '红', 'red'], 'red'],
+    [['蓝色', '蓝', 'blue'], 'blue'],
+    [['绿色', '绿', 'green'], 'green'],
+    [['黄色', '黄', '金色', 'yellow', 'blonde', 'blond', 'gold', 'golden'], 'yellow'],
+    [['粉色', '粉', 'pink'], 'pink'],
+    [['紫色', '紫', 'purple', 'violet'], 'purple'],
+    [['灰色', '灰', 'gray', 'grey'], 'gray'],
+    [['银色', '银', 'silver'], 'silver'],
+    [['橙色', '橙', '橘', 'orange'], 'orange'],
+    [['青色', '青', 'cyan', 'teal'], 'cyan'],
+    [['女', '女性', 'female', 'girl', 'woman'], 'female'],
+    [['男', '男性', 'male', 'boy', 'man'], 'male'],
+    [['温柔', '温和', '柔和', 'gentle', 'tender', 'soft'], 'gentle'],
+];
+
+function canonFieldKey(raw) {
+    const k = normalizeText(String(raw || '')).toLowerCase().replace(/[\s_\-./]/g, '');
+    if (!k) return '';
+    for (const [aliases, canon] of FIELD_CANON_MAP) {
+        for (const a of aliases) {
+            const na = normalizeText(a).toLowerCase().replace(/[\s_\-./]/g, '');
+            if (!na) continue;
+            if (k === na || k.includes(na) || na.includes(k)) return canon;
+        }
+    }
+    return k.slice(0, 16);
+}
+
+function canonValue(raw) {
+    const t = String(raw || '').trim();
+    if (!t) return '';
+    const low = t.toLowerCase();
+    for (const [aliases, canon] of VALUE_SYNONYMS) {
+        for (const a of aliases) {
+            if (t === a || low === String(a).toLowerCase()) return canon;
+        }
+    }
+    for (const [aliases, canon] of VALUE_SYNONYMS) {
+        for (const a of aliases) {
+            if (t.includes(a) && t.length <= String(a).length + 4) return canon;
+        }
+    }
+    return normalizeText(t).toLowerCase();
+}
+
+function knownFieldAliases() {
+    const list = [];
+    for (const [aliases, canon] of FIELD_CANON_MAP) {
+        for (const a of aliases) list.push({ alias: String(a), canon });
+    }
+    list.sort((x, y) => y.alias.length - x.alias.length);
+    return list;
+}
+const _FIELD_ALIASES = knownFieldAliases();
+
+function looseVal(s) {
+    return normalizeText(String(s || '')).toLowerCase().replace(/[,，、;；.\-\s]/g, '');
+}
+
+function valuesCompatible(aRaw, bRaw, aCanon, bCanon) {
+    if (aCanon && bCanon && aCanon === bCanon) return true;
+    const la = looseVal(aRaw);
+    const lb = looseVal(bRaw);
+    if (!la || !lb) return false;
+    if (la === lb) return true;
+    // 短标签（≤3字）禁止「被更长句包含」——避免 温柔 ⊂ 温柔清新的邻家风、黑色 ⊂ 黑色长发 在错误场景被放大
+    // 仅当两侧都较长且互相包含时才算
+    const shortA = [...String(aRaw)].length <= 3;
+    const shortB = [...String(bRaw)].length <= 3;
+    if (shortA || shortB) {
+        // 短对短：必须松散相等或同 canon
+        if (shortA && shortB) return la === lb || (aCanon && aCanon === bCanon);
+        // 一短一长：长串必须以短串为「完整词片段」且剩余部分是发质等可接受后缀
+        const short = shortA ? la : lb;
+        const long = shortA ? lb : la;
+        if (!long.includes(short)) return false;
+        // 允许 黑色 + 黑色长发；不允许 温柔 + 温柔清新的邻家风（后缀过长且非发型类）
+        const rest = long.replace(short, '');
+        if (!rest) return true;
+        if (/^(色)?(长发|短发|卷发|直发|微卷|齐肩|及腰)/.test(rest)) return true;
+        if (rest.length <= 2 && /发|色|瞳/.test(rest)) return true;
+        return false;
+    }
+    if (la.includes(lb) || lb.includes(la)) return true;
+    // 主色相同 + 其余有重叠
+    let ca = '', cb = '';
+    for (const [aliases, canon] of VALUE_SYNONYMS) {
+        for (const a of aliases) {
+            if (!ca && String(aRaw).includes(a)) ca = canon;
+            if (!cb && String(bRaw).includes(a)) cb = canon;
+        }
+    }
+    if (ca && cb && ca === cb) {
+        let ra = la, rb = lb;
+        for (const [aliases] of VALUE_SYNONYMS) {
+            for (const a of aliases) {
+                const n = looseVal(a);
+                if (n) { ra = ra.split(n).join(''); rb = rb.split(n).join(''); }
+            }
+        }
+        if (!ra || !rb) return true;
+        if (ra.includes(rb) || rb.includes(ra)) return true;
+    }
+    return false;
+}
+
+/**
+ * 从「结构化 key:value」+「中文散文」里抽出事实 { field, valueRaw, valueCanon }
+ */
+export function extractFieldValues(text) {
+    const out = [];
+    const seen = new Set();
+    const push = (field, valueRaw) => {
+        const v = String(valueRaw || '').trim().replace(/^[-–—•·]\s*/, '');
+        if (!field || !v) return;
+        const key = `${field}::${looseVal(v)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ field, valueRaw: v, valueCanon: canonValue(v) });
+    };
+
+    const raw = String(text || '');
+    const lines = raw.split(/\n/);
+    for (const line of lines) {
+        const t = line.trim();
+        if (!t) continue;
+        // key: value
+        const m = t.match(/^([^:：]{1,40})[:：]\s*(.+)$/);
+        if (m) {
+            push(canonFieldKey(m[1]), m[2]);
+            // 列表项 "- 温柔" 在 personality 段：也由下面散文补
+            continue;
+        }
+        // 无冒号：最长字段前缀
+        for (const { alias, canon } of _FIELD_ALIASES) {
+            if (t.startsWith(alias) && t.length > alias.length) {
+                push(canon, t.slice(alias.length).replace(/^[:：\s]+/, ''));
+                break;
+            }
+            const low = t.toLowerCase();
+            const al = alias.toLowerCase();
+            if (low.startsWith(al) && t.length > alias.length) {
+                push(canon, t.slice(al.length).replace(/^[:：\s]+/, ''));
+                break;
+            }
+        }
+        // YAML 列表 "- 温柔"
+        const bullet = t.match(/^[-–—•·*]\s*(.+)$/);
+        if (bullet) {
+            // 无字段时用 personality 猜测短特质
+            const v = bullet[1].trim();
+            if (v.length <= 12 && /[\u4e00-\u9fff]/.test(v)) push('personality', v);
+        }
+    }
+
+    // —— 散文模式：整段里抓常见「标签+值」——
+    const prose = raw.replace(/\n/g, '，');
+    const proseRules = [
+        [/身高\s*[:：]?\s*(\d+(?:\.\d+)?\s*(?:cm|CM|厘米)?)/g, 'height'],
+        [/height\s*[:：]?\s*(\d+(?:\.\d+)?\s*(?:cm)?)/gi, 'height'],
+        [/体重\s*[:：]?\s*(\d+(?:\.\d+)?\s*(?:kg|KG|公斤)?)/g, 'weight'],
+        [/年龄\s*[:：]?\s*(\d+\s*岁?)/g, 'age'],
+        [/age\s*[:：]?\s*(\d+)/gi, 'age'],
+        [/眼睛\s*[:：]?\s*([\u4e00-\u9fffA-Za-z]{1,8})/g, 'eye'],
+        [/瞳色\s*[:：]?\s*([\u4e00-\u9fffA-Za-z]{1,8})/g, 'eye'],
+        [/eyes?\s*[:：]?\s*([\u4e00-\u9fffA-Za-z]{1,12})/gi, 'eye'],
+        [/发色\s*[:：]?\s*([^\s。；;]{1,24})/g, 'hair'],
+        [/头发\s*[:：]?\s*([^\s。；;]{1,24})/g, 'hair'],
+        [/发型\s*[:：]?\s*([^\s，,。；;]{1,16})/g, 'hair'],
+        [/hair\s*[:：]?\s*([^\n，,。；;]{1,20})/gi, 'hair'],
+        [/性格\s*[:：]?\s*([^\s，,。；;]{1,12})/g, 'personality'],
+        [/personality\s*[:：]?\s*([^\n]{1,20})/gi, 'personality'],
+        [/性别\s*[:：]?\s*([男女女性maleFEMALE]{1,6})/gi, 'gender'],
+        [/(?:^|[，,、\s])([男女])(?:[，,、\s]|$)/g, 'gender'],
+    ];
+    for (const [re, field] of proseRules) {
+        re.lastIndex = 0;
+        let m;
+        const r = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+        while ((m = r.exec(prose)) !== null) {
+            push(field, m[1]);
+        }
+    }
+    // 「性格温柔」连写
+    const glued = prose.match(/性格([\u4e00-\u9fff]{1,6})/g) || [];
+    for (const g of glued) push('personality', g.replace(/^性格/, ''));
+
+    // 性格后逗号分隔的特质：性格温柔，细心，慢热
+    const traitBlock = prose.match(/性格[:：]?([^。；;！!？?]{2,40})/);
+    if (traitBlock) {
+        const chunk = traitBlock[1];
+        // 在遇到下一个字段关键词前切开
+        const cut = chunk.split(/发色|头发|眼睛|瞳色|身高|体重|性别|age|hair|eyes|height/i)[0];
+        for (const part of cut.split(/[,，、/|]/)) {
+            const t = part.replace(/^性格/, '').trim();
+            if (t.length >= 1 && t.length <= 8 && /[\u4e00-\u9fff]/.test(t)) {
+                push('personality', t);
+            }
+        }
+    }
+
+    return out;
+}
+
+/**
+ * 共同片段：两侧事实按规范字段对齐；返回可读标签列表
+ */
 export function extractSharedSnippets(aText, bText, opts = {}) {
-    const shortMode = !!opts.shortMode;
     const a = String(aText || '');
     const b = String(bText || '');
     if (!a || !b) return [];
 
-    const minLen = shortMode ? 2 : 3;
-    const candidates = new Set();
-    const pushMatches = (text, re) => {
-        const m = text.match(re) || [];
-        for (const x of m) {
-            const t0 = String(x).trim();
-            if (t0.length >= minLen) candidates.add(t0);
-        }
+    const aFacts = extractFieldValues(a);
+    const bFacts = extractFieldValues(b);
+    const shared = [];
+    const seen = new Set();
+
+    const pushLabel = (label) => {
+        const s = String(label || '').replace(/\s+/g, ' ').trim();
+        if (!s || s.length < 1 || s.length > 28) return;
+        const k = normalizeText(s);
+        if (!k || seen.has(k)) return;
+        // 被更长标签包含则跳过（稍后排序再滤）
+        seen.add(k);
+        shared.push(s);
     };
 
-    // Measurements: number + unit only
-    pushMatches(a, /\d+(?:\.\d+)?\s*(?:cm|kg|mm|m|岁|%|斤)/gi);
+    const FIELD_LABEL = { eye: '眼睛', hair: '发色', height: '身高', weight: '体重', gender: '性别', age: '年龄', personality: '性格', style: '风格', skin: '肤色', name: '姓名' };
+    const HAIR_PARTS = ['长发', '短发', '卷发', '直发', '微卷', '齐肩', '及腰', '黑长直'];
 
-    // Chinese phrases (prefer these)
-    pushMatches(a, /[\u4e00-\u9fff]{2,12}/g);
+    for (const fa of aFacts) {
+        for (const fb of bFacts) {
+            if (fa.field !== fb.field) continue;
+            if (!valuesCompatible(fa.valueRaw, fb.valueRaw, fa.valueCanon, fb.valueCanon)) continue;
+            let label = fa.valueRaw;
+            if (fb.valueRaw.length < label.length) label = fb.valueRaw;
+            if (/^[a-z]+$/i.test(label) && /[\u4e00-\u9fff]/.test(fa.valueRaw + fb.valueRaw)) {
+                label = /[\u4e00-\u9fff]/.test(fa.valueRaw) ? fa.valueRaw : fb.valueRaw;
+            }
+            // 展示完整一些：两侧都有的最长公共可读串优先
+            const la = looseVal(fa.valueRaw);
+            const lb = looseVal(fb.valueRaw);
+            if (la.length >= 4 && lb.length >= 4) {
+                if (la.includes(lb)) label = fb.valueRaw;
+                else if (lb.includes(la)) label = fa.valueRaw;
+            }
+            pushLabel(label);
+            // 两侧原文都推进去，方便高亮「黑色，长发」与「黑色长发」两种写法
+            if (fa.valueRaw !== label) pushLabel(fa.valueRaw);
+            if (fb.valueRaw !== label) pushLabel(fb.valueRaw);
 
-    // Mixed: Chinese + number like 168cm already covered; skip pure ASCII keys
-
-    const bLow = b.toLocaleLowerCase();
-    const shared = [];
-    for (const c of candidates) {
-        if (!isMeaningfulSnippet(c, minLen)) continue;
-        if (COMMON_STOPWORDS.has(c.toLocaleLowerCase())) continue;
-        if (COMMON_STOPWORDS.has(c)) continue;
-        if (b.includes(c) || bLow.includes(c.toLocaleLowerCase())) shared.push(c);
+            if (fa.field === 'hair') {
+                for (const part of HAIR_PARTS) {
+                    if (String(fa.valueRaw).includes(part) && String(fb.valueRaw).includes(part)) {
+                        pushLabel(part);
+                    }
+                }
+            }
+        }
     }
 
-    const seen = new Set();
+    // 发色部件：即使散文切分丢了「长发」，只要两侧原文都有仍标出
+    for (const part of HAIR_PARTS) {
+        if (a.includes(part) && b.includes(part)) pushLabel(part);
+    }
+
+    // 补充：两侧都出现的较长中文短语（>=4）且字段不冲突
+    const minLen = opts.shortMode ? 2 : 4;
+    const cands = new Set();
+    for (const x of a.match(/[\u4e00-\u9fff]{4,14}/g) || []) cands.add(x);
+    for (const x of a.match(/\d+(?:\.\d+)?\s*(?:cm|kg|岁)/gi) || []) cands.add(String(x).trim());
+    for (const c of cands) {
+        if (!b.includes(c)) continue;
+        if (COMMON_STOPWORDS.has(c)) continue;
+        // 若该词在两侧绑定不同字段则跳过
+        const fa = aFacts.find(f => f.valueRaw.includes(c) || c.includes(f.valueRaw));
+        const fb = bFacts.find(f => f.valueRaw.includes(c) || c.includes(f.valueRaw));
+        if (fa && fb && fa.field !== fb.field) continue;
+        pushLabel(c);
+    }
+
     return shared
         .sort((x, y) => y.length - x.length)
-        .filter(s => {
+        .filter((s, _, arr) => {
             const k = normalizeText(s);
-            if (!k || seen.has(k)) return false;
-            for (const keep of seen) {
-                if (keep.includes(k) && keep !== k) return false;
+            for (const o of arr) {
+                if (o !== s && normalizeText(o).includes(k) && o.length > s.length) return false;
             }
-            seen.add(k);
             return true;
         })
         .slice(0, 24);
 }
 
-/** Drop schema keys, pure English fillers, tiny tokens */
+/** 过滤字段名、纯英文填充、过短无意义 token */
 function isMeaningfulSnippet(s, minLen) {
     const t = String(s || '').trim();
     if (t.length < minLen || t.length > 20) return false;
@@ -338,11 +603,32 @@ export function shouldUseFragmentMode(baseText, otherText, score) {
 
 export function highlightSnippets(text, snippets) {
     let html = escapeHtml(text);
-    const sorted = [...snippets].sort((a, b) => b.length - a.length);
+    // 短词（≤2字）不做全文替换高亮，避免「温柔」点亮「温柔清新的邻家风」
+    const sorted = [...snippets]
+        .filter(s => String(s).replace(/\s/g, '').length >= 3)
+        .sort((a, b) => b.length - a.length);
     for (const s of sorted) {
         const esc = escapeHtml(s);
         if (!esc) continue;
         html = html.split(esc).join(`<mark class="pmp18-share">${esc}</mark>`);
+    }
+    // 2字词：仅在「性格X」「- X」「X，」等边界处高亮
+    const shorts = [...snippets].filter(s => {
+        const n = String(s).replace(/\s/g, '');
+        return n.length > 0 && n.length <= 2;
+    });
+    for (const s of shorts) {
+        const esc = escapeHtml(s);
+        if (!esc) continue;
+        const patterns = [
+            new RegExp('(性格\\s*)(' + esc + ')', 'g'),
+            new RegExp('([-–—•·*]\\s*)(' + esc + ')(?=[\\s，,。；;]|$)', 'g'),
+            new RegExp('(gender\\s*[:：]\\s*)(' + esc + ')', 'gi'),
+            new RegExp('(性别\\s*[:：]?\\s*)(' + esc + ')', 'g'),
+        ];
+        for (const re of patterns) {
+            html = html.replace(re, '$1<mark class="pmp18-share">$2</mark>');
+        }
     }
     return html;
 }
