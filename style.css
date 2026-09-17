@@ -3757,3 +3757,86 @@ body > .pmp18-update-overlay {
     flex: 1 1 auto !important;
   }
 }
+
+/* 弹窗：整屏居中（移动端也不贴顶） */
+.pmp18-editor-overlay.is-popup {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1000100 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 100% !important;
+  min-height: 100dvh !important;
+  padding: max(16px, env(safe-area-inset-top, 0px))
+           14px
+           max(16px, env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: border-box !important;
+  background: rgba(40, 36, 40, 0.28) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+.pmp18-editor-overlay.is-popup .pmp18-editor {
+  position: relative !important;
+  inset: auto !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: min(520px, 100%) !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: min(82dvh, 680px) !important;
+  margin: 0 auto !important;
+  border-radius: 22px !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+}
+
+.pmp18-editor-overlay.is-popup .pmp18-editor-ta {
+  flex: 1 1 auto !important;
+  min-height: 120px !important;
+  max-height: none !important;
+}
+
+/* 窄屏：仍然居中，不要变成全屏贴顶 */
+@media (max-width: 900px) {
+  .pmp18-editor-overlay.is-popup {
+    align-items: center !important;
+    justify-content: center !important;
+    padding: max(16px, env(safe-area-inset-top, 0px))
+             14px
+             max(16px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .pmp18-editor-overlay.is-popup .pmp18-editor {
+    position: relative !important;
+    inset: auto !important;
+    width: min(520px, 100%) !important;
+    height: auto !important;
+    max-height: min(80dvh, 640px) !important;
+    border-radius: 22px !important;
+    margin: 0 auto !important;
+  }
+}
+
+/* 全屏模式不受影响（仅 fullscreen 铺满） */
+.pmp18-editor-overlay.is-fullscreen {
+  padding: 0 !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+}
+
+.pmp18-editor-overlay.is-fullscreen .pmp18-editor {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+}
