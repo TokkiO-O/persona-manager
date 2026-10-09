@@ -28,6 +28,8 @@ export const state = {
     compareChromeOpen: false, // 工具区是否展开
     listDensity: 'comfy', // 'comfy' | 'compact'
     groupFold: {}, // groupKey -> true if folded
+    filterTagId: null,
+    filterCategoryId: null,
 };
 
 export function saveSettingsLocal() {

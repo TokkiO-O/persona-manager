@@ -637,16 +637,31 @@ export function renderFragmentCompare(baseText, otherText, opts = {}) {
     const shortMode = !!opts.shortMode;
     const shared = extractSharedSnippets(baseText, otherText, { shortMode });
     const shareHtml = shared.length
-        ? `<div class="pmp18-share-list">${shared.map(s => `<button type="button" class="pmp18-share-chip" data-action="jump-share" data-snippet="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`
+        ? `<div class="pmp18-share-list">${shared.map(s => `<span class="pmp18-share-item"><button type="button" class="pmp18-share-chip" data-action="jump-share" data-snippet="${encodeURIComponent(s)}">${escapeHtml(s)}</button><button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(s)}" title="采纳到基准">采纳</button></span>`).join('')}</div>`
         : `<div class="pmp18-muted">未抽出可对齐的共同短句/数字（结构差异较大时属正常）</div>`;
+
+    // 对方全文按段展示，每段都可采纳（不限「相同」共同片段）
+    const otherUnits = splitUnits(otherText);
+    const otherBlocks = (otherUnits.length ? otherUnits : [String(otherText || '')]).map(u => {
+        const body = highlightSnippets(u, shared);
+        return `<div class="pmp18-col-block frag pmp18-col-block--adopt">
+          <div class="pmp18-frag-body">${body}</div>
+          <button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(u)}" title="采纳本段到基准">采纳本段</button>
+        </div>`;
+    }).join('');
+
+    const baseUnits = splitUnits(baseText);
+    const baseBlocks = (baseUnits.length ? baseUnits : [String(baseText || '')]).map(u =>
+        `<div class="pmp18-col-block frag">${highlightSnippets(u, shared)}</div>`
+    ).join('');
 
     return {
         legendExtra: true,
         shortMode,
         sharedCount: shared.length,
-        baseHtml: `<div class="pmp18-col-block frag">${highlightSnippets(baseText, shared)}</div>`,
-        otherHtml: `<div class="pmp18-col-block frag">${highlightSnippets(otherText, shared)}</div>`,
-        sharePanel: `<div class="pmp18-share-panel"><div class="pmp18-share-title">共同片段（${shared.length}）${shortMode ? ' · 短人设模式' : ''}</div>${shareHtml}</div>`,
+        baseHtml: baseBlocks || `<div class="pmp18-col-block frag">${highlightSnippets(baseText, shared)}</div>`,
+        otherHtml: otherBlocks || `<div class="pmp18-col-block frag">${highlightSnippets(otherText, shared)}</div>`,
+        sharePanel: `<div class="pmp18-share-panel"><div class="pmp18-share-title">共同片段（${shared.length}）${shortMode ? ' · 短人设模式' : ''} · 对方任意段也可「采纳本段」</div>${shareHtml}</div>`,
     };
 }
 
@@ -687,10 +702,10 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
             flushGaps();
             if (isPureSame) {
                 const lineCount = String(side === 'base' ? row.a : row.b).split('\n').length;
-                parts.push(`<div class="pmp18-col-block same" data-pmp18-same-lines="${lineCount}">${escapeHtml(side === 'base' ? row.a : row.b)}</div>`);
+                parts.push(`<div class="pmp18-col-block same" data-pmp18-same-lines="${lineCount}">${escapeHtml(side === 'base' ? row.a : row.b)}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
             } else {
                 const { left, right } = inlineDiffHtml(row.a, row.b);
-                parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
+                parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
             }
             continue;
         }
@@ -708,7 +723,7 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
         if (row.type === 'add') {
             if (side === 'other') {
                 flushGaps();
-                parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark></div>`);
+                parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark><button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button></div>`);
             } else {
                 gapOnlyOther += 1;
             }
@@ -717,7 +732,7 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
 
         flushGaps();
         const { left, right } = inlineDiffHtml(row.a || '', row.b || '');
-        parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}</div>`);
+        parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
     }
     flushGaps();
     return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无内容</div>';

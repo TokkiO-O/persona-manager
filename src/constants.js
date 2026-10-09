@@ -1,7 +1,7 @@
 /** Shared constants for Persona Manager */
 
 export const EXT = 'Persona Manager';
-export const VERSION = '1.10.1';
+export const VERSION = '1.10.2';
 export const ROOT_ID = 'pmp18-root';
 export const BUTTON_ID = 'pmp18-entry';
 export const ENTRY_MARK = 'pmp18-entry-installed';
@@ -48,12 +48,40 @@ export const COMMON_STOPWORDS = new Set([
 ]);
 
 /** editorMode: 'popup' | 'fullscreen' */
+/** 预设标签色（马卡龙） */
+export const TAG_COLOR_PRESETS = [
+    '#e8a0b4', '#f8c0d4', '#c4b0e0', '#a8d4a0', '#e8c89a',
+    '#FFB7B2', '#FFDAC1', '#B5EAD7', '#C7CEEA', '#FEC8D8',
+];
+
+/** uiTheme: sakura | peach | minimal | y2k */
+export const UI_THEMES = [
+    { id: 'sakura', name: '樱粉', desc: '玫粉 · 蕾丝 · 华丽' },
+    { id: 'peach', name: '蜜桃清透', desc: '浅桃 · 简洁圆角' },
+    { id: 'minimal', name: '素净', desc: '留白 · 细线' },
+    { id: 'y2k', name: '千禧粉', desc: '亮粉 · 渐变光感' },
+];
+
 export const defaultSettings = {
     similarityThreshold: 0.55,
     includeSameNameInSimilar: true,
     showDiffOnly: false,
     softMatchThreshold: 0.35,
     editorMode: 'popup',
+    uiTheme: 'sakura',
+    /** @type {{ id: string, name: string, color: string }[]} */
+    tagDefs: [],
+    /** @type {Record<string, string[]>} personaId -> tagId[] */
+    tagMap: {},
+    /** @type {{ id: string, name: string, description: string, title: string, deletedAt: number }[]} */
+    trash: [],
+    trashMaxDays: 30,
+    /** 原版界面融入分类/标签（非芯片条） */
+    injectTagsToNative: true,
+    /** @type {{ id: string, name: string }[]} */
+    categoryDefs: [],
+    /** @type {Record<string, string>} personaId -> categoryId */
+    categoryMap: {},
 };
 
 /** Below this total char count for BOTH sides, treat as "short persona":

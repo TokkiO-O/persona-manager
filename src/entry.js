@@ -33,11 +33,14 @@ export function makeEntry(floating = false) {
     const entry = document.createElement('button');
     entry.id = BUTTON_ID;
     entry.type = 'button';
-    entry.className = floating ? 'menu_button pmp18-entry pmp18-entry-float' : 'menu_button pmp18-entry';
+    entry.className = floating
+        ? 'menu_button pmp18-entry pmp18-entry-float'
+        : 'menu_button menu_button_icon pmp18-entry';
     entry.dataset.pmp18 = ENTRY_MARK;
+    entry.title = 'Persona Manager';
     entry.innerHTML = floating
-        ? '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span>'
-        : '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span><small>管理 / 对比 / 重复检测</small>';
+        ? '<i class="fa-solid fa-users-viewfinder"></i>'
+        : '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span>';
     entry.addEventListener('click', () => _openManager('all'));
     return entry;
 }

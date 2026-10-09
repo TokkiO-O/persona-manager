@@ -1,4 +1,4 @@
-import { EXT, VERSION, ROOT_ID } from '../constants.js';
+import { EXT, VERSION, ROOT_ID, UI_THEMES } from '../constants.js';
 import { state, saveSettingsLocal } from '../state.js';
 import { escapeHtml, computeReadableInk } from '../util.js';
 import {
@@ -9,10 +9,136 @@ import {
 } from '../similarity.js';
 import { checkForUpdates, showUpdateModal, scheduleAutoUpdateCheck } from '../update.js';
 import {
-    renderAllView, renderSameNameView, renderDuplicateView, renderSimilarView, renderCard
+    renderAllView, renderSameNameView, renderDuplicateView, renderSimilarView, renderUnclassifiedView, renderCard
 } from './components.js';
 import { renderCompareWorkspace } from './compare.js';
 import { openFullEditor } from './editor.js';
+import { openMergeDialog } from './merge.js';
+import { openAdoptDialog } from './adopt.js';
+import { getTagDefs, createTag, deleteTagDef, togglePersonaTag, getTagsForPersona, setPersonaTags, updateTag } from '../tags.js';
+import {
+    getCategoryDefs, createCategory, deleteCategoryDef, setPersonaCategories, getCategoriesForPersona,
+    getCategoryForPersona, getCategoryMap
+} from '../categories.js';
+import { listTrash, pushToTrash, snapshotPersona, restoreFromTrash, purgeTrashItem, emptyTrash } from '../trash.js';
+import { getActiveAvatarId } from '../persona-data.js';
+import { TAG_COLOR_PRESETS } from '../constants.js';
+
+
+function openTagPicker(personaId) {
+    const defs = getTagDefs();
+    const cur = new Set(getTagsForPersona(personaId).map(x => x.id));
+    let draftColor = TAG_COLOR_PRESETS[0];
+    const pick = document.createElement('div');
+    pick.className = 'pmp18-editor-overlay is-popup';
+    const paint = () => {
+        const list = getTagDefs();
+        const body = pick.querySelector('.pmp18-tag-picker-body');
+        if (!body) return;
+        body.innerHTML = `
+          <div class="pmp18-tag-pick-list">
+            ${list.length ? list.map(d => `
+              <label class="pmp18-tag-pick">
+                <input type="checkbox" data-tid="${d.id}" ${cur.has(d.id) ? 'checked' : ''}>
+                <span class="pmp18-tag-chip" style="--pmp-tag:${d.color}">${escapeHtml(d.name)}</span>
+              </label>`).join('') : '<p class="pmp18-muted">还没有标签，在下方直接输入创建</p>'}
+          </div>
+          <div class="pmp18-tag-inline-create">
+            <div class="pmp18-tag-inline-row">
+              <input type="text" class="pmp18-tag-new-input" placeholder="新标签名（回车或点添加）" maxlength="24">
+              <button type="button" class="pmp18-primary-btn pmp18-tag-add-btn">添加</button>
+            </div>
+            <div class="pmp18-tag-colors">
+              ${TAG_COLOR_PRESETS.map((c, i) =>
+                `<button type="button" class="pmp18-tag-color ${c === draftColor ? 'is-on' : ''}" data-color="${c}" style="background:${c}"></button>`
+              ).join('')}
+            </div>
+          </div>`;
+        body.querySelectorAll('input[data-tid]').forEach(inp => {
+            inp.onchange = () => {
+                if (inp.checked) cur.add(inp.dataset.tid);
+                else cur.delete(inp.dataset.tid);
+            };
+        });
+        body.querySelectorAll('.pmp18-tag-color').forEach(btn => {
+            btn.onclick = (e) => {
+                e.preventDefault();
+                draftColor = btn.dataset.color;
+                body.querySelectorAll('.pmp18-tag-color').forEach(b => b.classList.toggle('is-on', b === btn));
+            };
+        });
+        const input = body.querySelector('.pmp18-tag-new-input');
+        const addNew = () => {
+            const name = (input?.value || '').trim();
+            if (!name) {
+                if (typeof toastr !== 'undefined') toastr.warning('请输入标签名');
+                return false;
+            }
+            const tag = createTag(name, draftColor);
+            if (!tag) {
+                // 已存在则勾选已有
+                const exist = getTagDefs().find(t => t.name === name);
+                if (exist) {
+                    cur.add(exist.id);
+                    if (input) input.value = '';
+                    paint();
+                    if (typeof toastr !== 'undefined') toastr.info(`已勾选已有标签「${name}」`);
+                    return true;
+                }
+                if (typeof toastr !== 'undefined') toastr.warning('标签无效');
+                return false;
+            }
+            cur.add(tag.id);
+            if (input) input.value = '';
+            paint();
+            try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+            if (typeof toastr !== 'undefined') toastr.success(`已创建「${tag.name}」`);
+            return true;
+        };
+        input?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); addNew(); }
+        });
+        body.querySelector('.pmp18-tag-add-btn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            addNew();
+        });
+    };
+    pick.innerHTML = `<div class="pmp18-editor pmp18-tag-picker" role="dialog" aria-modal="true">
+        <div class="pmp18-editor-head">
+          <strong>设置标签</strong>
+          <button type="button" class="pmp18-close" data-x><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="pmp18-tag-picker-body"></div>
+        <div class="pmp18-editor-actions">
+          <button type="button" class="pmp18-small-btn" data-x>取消</button>
+          <button type="button" class="pmp18-primary-btn" data-save>保存</button>
+        </div>
+      </div>`;
+    const close = () => pick.remove();
+    pick.addEventListener('click', e => { if (e.target === pick || e.target.closest('[data-x]')) close(); });
+    pick.querySelector('[data-save]').onclick = () => {
+        // 保存前：若输入框还有未添加的名字，先创建并勾选
+        const input = pick.querySelector('.pmp18-tag-new-input');
+        const pending = (input?.value || '').trim();
+        if (pending) {
+            const tag = createTag(pending, draftColor);
+            if (tag) cur.add(tag.id);
+            else {
+                const exist = getTagDefs().find(t => t.name === pending);
+                if (exist) cur.add(exist.id);
+            }
+        }
+        setPersonaTags(personaId, [...cur]);
+        try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+        close();
+        renderManager();
+        if (typeof toastr !== 'undefined') toastr.success('标签已保存');
+    };
+    document.body.appendChild(pick);
+    paint();
+    pick.querySelector('.pmp18-tag-new-input')?.focus();
+}
 
 export function tabButton(key, label, icon, count) {
     const extra = key === 'settings' && state.updateInfo?.available
@@ -58,15 +184,183 @@ export function renderSettingsPanel() {
                 </div>
                 <div class="pmp18-muted" style="margin-top:6px;font-size:12px">弹窗：居中圆角留白 · 全屏：铺满屏幕</div>
             </div>
+            <div class="pmp18-settings-row">
+                <label>界面主题</label>
+                <div class="pmp18-theme-grid">
+                    ${UI_THEMES.map(th => `
+                      <button type="button" class="pmp18-theme-card ${(state.settings.uiTheme || 'minimal') === th.id ? 'is-on' : ''}"
+                        data-action="set-ui-theme" data-theme="${th.id}" title="${escapeHtml(th.desc)}">
+                        <span class="pmp18-theme-swatch pmp18-theme-swatch--${th.id}"></span>
+                        <span class="pmp18-theme-name">${escapeHtml(th.name)}</span>
+                      </button>`).join('')}
+                </div>
+            </div>
         </div>`;
 }
 
 export function renderManagerContent(personas) {
     if (state.tab === 'settings') return renderSettingsPanel();
+    if (state.tab === 'trash') return renderTrashView();
+    if (state.tab === 'tags') return renderTagsManageView();
+    if (state.tab === 'categories') {
+        return renderCategoriesManageView() + renderUnclassifiedView(personas);
+    }
     if (state.tab === 'all') return renderAllView(personas);
     if (state.tab === 'same-name') return renderSameNameView(personas);
     if (state.tab === 'duplicates') return renderDuplicateView(personas);
     return renderSimilarView(personas);
+}
+
+function renderTrashView() {
+    const items = listTrash();
+    if (!items.length) {
+        return `<div class="pmp18-empty"><strong>回收站为空</strong><span>删除的人设会暂存在这里，可恢复或彻底删除</span></div>`;
+    }
+    return `<div class="pmp18-trash-toolbar">
+        <button type="button" class="pmp18-small-btn pmp18-danger-btn" data-action="empty-trash">清空回收站</button>
+        <span class="pmp18-muted">${items.length} 条 · 超过 ${state.settings.trashMaxDays || 30} 天将自动清理</span>
+      </div>
+      <div class="pmp18-trash-list">${items.map(it => `
+        <div class="pmp18-trash-item" data-id="${escapeHtml(it.id)}">
+          <div class="pmp18-trash-main">
+            <strong>${escapeHtml(it.name)}</strong>
+            <span class="pmp18-muted">${new Date(it.deletedAt || 0).toLocaleString()}</span>
+            <div class="pmp18-trash-desc">${escapeHtml(String(it.description || '').slice(0, 120))}</div>
+          </div>
+          <div class="pmp18-trash-actions">
+            <button type="button" class="pmp18-small-btn" data-action="restore-trash" data-id="${escapeHtml(it.id)}">恢复</button>
+            <button type="button" class="pmp18-small-btn pmp18-danger-btn" data-action="purge-trash" data-id="${escapeHtml(it.id)}">彻底删除</button>
+          </div>
+        </div>`).join('')}</div>`;
+}
+
+
+function renderCategoriesManageView() {
+    const defs = getCategoryDefs();
+    return `<div class="pmp18-cat-page">
+      <div class="pmp18-cat-create-bar">
+        <input type="text" id="pmp18-new-cat-name" placeholder="新建分类名" maxlength="24">
+        <button type="button" class="pmp18-primary-btn" data-action="create-category">添加</button>
+      </div>
+      ${defs.length ? `<div class="pmp18-cat-chips-row">${defs.map(t => `
+        <span class="pmp18-cat-chip-item">
+          <span class="pmp18-meta-chip pmp18-meta-chip--cat">${escapeHtml(t.name)}</span>
+          <button type="button" class="pmp18-cat-chip-del" data-action="delete-category" data-id="${t.id}" title="删除">×</button>
+        </span>`).join('')}</div>` : '<p class="pmp18-muted pmp18-cat-hint">创建分类后，点人设卡片上的书签图标即可归类（可多选）</p>'}
+      <div class="pmp18-cat-section-label">按分类浏览</div>
+    </div>`;
+}
+
+function openOrganizePicker(personaId) {
+    const catDefs = getCategoryDefs();
+    const tagDefs = getTagDefs();
+    const curCat = new Set(getCategoriesForPersona(personaId).map(x => x.id));
+    const curTag = new Set(getTagsForPersona(personaId).map(x => x.id));
+    let draftColor = (typeof TAG_COLOR_PRESETS !== 'undefined' && TAG_COLOR_PRESETS[0]) || '#e8a0b4';
+    const pick = document.createElement('div');
+    pick.className = 'pmp18-editor-overlay is-popup';
+    const paint = () => {
+        const body = pick.querySelector('.pmp18-org-body');
+        if (!body) return;
+        body.innerHTML = `
+          <div class="pmp18-org-section">
+            <div class="pmp18-org-section-title">分类 <span class="pmp18-muted">可多选</span></div>
+            <div class="pmp18-org-list">
+              ${catDefs.length ? catDefs.map(d => `
+                <label class="pmp18-tag-pick">
+                  <input type="checkbox" data-kind="cat" data-id="${d.id}" ${curCat.has(d.id) ? 'checked' : ''}>
+                  <span class="pmp18-meta-chip pmp18-meta-chip--cat">${escapeHtml(d.name)}</span>
+                </label>`).join('') : '<p class="pmp18-muted">暂无分类，请到「分类」页创建</p>'}
+            </div>
+          </div>
+          <div class="pmp18-org-section">
+            <div class="pmp18-org-section-title">标签 <span class="pmp18-muted">可多选</span></div>
+            <div class="pmp18-org-list">
+              ${tagDefs.length ? tagDefs.map(d => `
+                <label class="pmp18-tag-pick">
+                  <input type="checkbox" data-kind="tag" data-id="${d.id}" ${curTag.has(d.id) ? 'checked' : ''}>
+                  <span class="pmp18-tag-chip" style="--pmp-tag:${d.color}">${escapeHtml(d.name)}</span>
+                </label>`).join('') : '<p class="pmp18-muted">暂无标签</p>'}
+            </div>
+            <div class="pmp18-tag-inline-create">
+              <div class="pmp18-tag-inline-row">
+                <input type="text" class="pmp18-tag-new-input" placeholder="快速新建标签" maxlength="24">
+                <button type="button" class="pmp18-primary-btn pmp18-tag-add-btn">添加</button>
+              </div>
+            </div>
+          </div>`;
+        body.querySelectorAll('input[data-kind]').forEach(inp => {
+            inp.onchange = () => {
+                const set = inp.dataset.kind === 'cat' ? curCat : curTag;
+                if (inp.checked) set.add(inp.dataset.id);
+                else set.delete(inp.dataset.id);
+            };
+        });
+        const input = body.querySelector('.pmp18-tag-new-input');
+        const addNew = () => {
+            const name = (input?.value || '').trim();
+            if (!name) return;
+            const tag = createTag(name, draftColor);
+            if (tag) { curTag.add(tag.id); input.value = ''; paint(); }
+            else if (typeof toastr !== 'undefined') toastr.warning('标签无效或已存在');
+        };
+        body.querySelector('.pmp18-tag-add-btn')?.addEventListener('click', e => { e.preventDefault(); addNew(); });
+        input?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addNew(); } });
+    };
+    pick.innerHTML = `<div class="pmp18-editor pmp18-org-dialog" role="dialog">
+      <div class="pmp18-editor-head"><strong>分类与标签</strong>
+        <button type="button" class="pmp18-close" data-x><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="pmp18-org-body pmp18-editor-body"></div>
+      <div class="pmp18-editor-actions">
+        <button type="button" class="pmp18-small-btn" data-x>取消</button>
+        <button type="button" class="pmp18-primary-btn" data-save>保存</button>
+      </div>
+    </div>`;
+    const close = () => pick.remove();
+    pick.addEventListener('click', e => { if (e.target === pick || e.target.closest('[data-x]')) close(); });
+    pick.querySelector('[data-save]').onclick = () => {
+        setPersonaCategories(personaId, [...curCat]);
+        setPersonaTags(personaId, [...curTag]);
+        try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+        close();
+        renderManager();
+        if (typeof toastr !== 'undefined') toastr.success('已保存');
+    };
+    document.body.appendChild(pick);
+    paint();
+}
+
+function openCategoryPicker(personaId) {
+    openOrganizePicker(personaId);
+}
+
+function renderTagsManageView() {
+    const defs = getTagDefs();
+    const colors = TAG_COLOR_PRESETS.map((c, i) =>
+        `<button type="button" class="pmp18-tag-color ${i === 0 ? 'is-on' : ''}" data-action="pick-tag-color" data-color="${c}" style="background:${c}"></button>`
+    ).join('');
+    return `<div class="pmp18-tags-manage">
+      <div class="pmp18-settings-row">
+        <label>新建标签</label>
+        <div class="pmp18-tag-create">
+          <div class="pmp18-tag-create-row">
+            <input type="text" id="pmp18-new-tag-name" placeholder="标签名，回车添加" maxlength="24">
+            <button type="button" class="pmp18-primary-btn" data-action="create-tag">添加</button>
+          </div>
+          <div class="pmp18-tag-colors" id="pmp18-new-tag-colors">${colors}</div>
+        </div>
+        <div class="pmp18-muted" style="margin-top:6px;font-size:12px">标签独立于备注；可在卡片上打标，原版 Persona 页可筛选</div>
+      </div>
+      <div class="pmp18-tag-def-list">${defs.length ? defs.map(t => `
+        <div class="pmp18-tag-def" data-id="${t.id}">
+          <span class="pmp18-tag-chip" style="--pmp-tag:${t.color}">${escapeHtml(t.name)}</span>
+          <span class="pmp18-tag-def-actions">
+            <button type="button" class="pmp18-small-btn" data-action="filter-tag" data-id="${t.id}">筛选</button>
+            <button type="button" class="pmp18-small-btn pmp18-danger-btn" data-action="delete-tag-def" data-id="${t.id}">删除</button>
+          </span>
+        </div>`).join('') : '<p class="pmp18-muted">还没有标签，在上方创建</p>'}
+      </div>
+    </div>`;
 }
 
 /** In-place update of the bottom selection hint. No full re-render, so the
@@ -81,6 +375,7 @@ export function updateSelectionHint(root) {
         ? `<div class="pmp18-selection-bar">
             <div><strong>已选 ${n} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
             <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
+            ${n === 2 ? '<button class="pmp18-small-btn" data-action="merge-selected">缝合</button>' : ''}
             <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
             <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
            </div>`
@@ -113,10 +408,19 @@ export function scheduleRender() {
     });
 }
 
+function applyUiTheme(root) {
+    if (!root) return;
+    const th = state.settings?.uiTheme || 'sakura';
+    root.setAttribute('data-theme', th);
+    root.classList.remove('pmp18-theme-sakura', 'pmp18-theme-peach', 'pmp18-theme-minimal', 'pmp18-theme-y2k');
+    root.classList.add(`pmp18-theme-${th}`);
+}
+
 export function renderManager() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
     try {
+        applyUiTheme(root);
         renderManagerInner();
     } catch (e) {
         // Render errors must NEVER leave the manager in a half-rendered state
@@ -127,6 +431,7 @@ export function renderManager() {
             root.innerHTML = `
                 <div class="pmp18-backdrop" data-action="close"></div>
                 <section class="pmp18-window" role="dialog" aria-modal="true">
+                    <div class="pmp18-lace-edge pmp18-lace-top" aria-hidden="true"></div>
                     <header class="pmp18-header">
                         <div class="pmp18-brand">
                             <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
@@ -184,6 +489,7 @@ export function renderManagerInner() {
         ? `<div class="pmp18-selection-bar">
             <div><strong>已选 ${state.selected.size} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
             <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
+            ${state.selected.size === 2 ? '<button class="pmp18-small-btn" data-action="merge-selected">缝合</button>' : ''}
             <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
             <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
            </div>`
@@ -196,6 +502,8 @@ export function renderManagerInner() {
     root.innerHTML = `
         <div class="pmp18-backdrop" data-action="close"></div>
         <section class="pmp18-window" role="dialog" aria-modal="true">
+            <div class="pmp18-lace-edge pmp18-lace-top" aria-hidden="true"></div>
+            <div class="pmp18-float-stickers" aria-hidden="true"><span class="pmp18-fs">♡</span><span class="pmp18-fs">✦</span><span class="pmp18-fs">✿</span><span class="pmp18-fs">❀</span><span class="pmp18-fs">★</span><span class="pmp18-fs">✧</span></div>
             <header class="pmp18-header">
                 <div class="pmp18-brand">
                     <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
@@ -217,22 +525,26 @@ export function renderManagerInner() {
                     ${state.query ? '<button data-action="clear-search"><i class="fa-solid fa-xmark"></i></button>' : ''}
                 </div>
                 <div class="pmp18-stats">
-                    <span><b>${personas.length}</b> 全部</span>
-                    <span><b>${sameNameGroups.length}</b> 同名</span>
-                    <span><b>${duplicateGroups.length}</b> 重复</span>
-                    ${state.tab === 'similar' ? `<span><b>${similarCount}</b> 相似</span>` : ''}
+                    <span class="pmp18-stat"><b>${personas.length}</b> 全部</span>
+                    <span class="pmp18-stat"><b>${sameNameGroups.length}</b> 同名</span>
+                    <span class="pmp18-stat"><b>${duplicateGroups.length}</b> 重复</span>
+                    ${state.tab === 'similar' ? `<span class="pmp18-stat"><b>${similarCount}</b> 相似</span>` : ''}
                     <button type="button" class="pmp18-density-btn" data-action="toggle-density" title="列表疏密">${state.listDensity === 'compact' ? '紧凑' : '舒适'}</button>
                 </div>
-            </div>
+</div>
             <nav class="pmp18-tabs">
                 ${tabButton('all', '全部', 'fa-layer-group')}
                 ${tabButton('same-name', '同名', 'fa-people-group', sameNameGroups.length)}
                 ${tabButton('duplicates', '完全重复', 'fa-copy', duplicateGroups.length)}
                 ${tabButton('similar', '高度相似', 'fa-clone')}
+                ${tabButton('categories', '分类', 'fa-folder')}
+                ${tabButton('tags', '标签', 'fa-tags')}
+                ${tabButton('trash', '回收站', 'fa-trash-can', listTrash().length || undefined)}
                 ${tabButton('settings', '设置', 'fa-sliders')}
             </nav>
             <main class="pmp18-content">${renderManagerContent(personas)}</main>
             ${selectionHint}`}
+            <div class="pmp18-lace-edge pmp18-lace-bottom" aria-hidden="true"></div>
         </section>`;
 
     // Restore scroll positions. Use rAF so the browser has finished layout.
@@ -577,6 +889,14 @@ export function ensureRoot() {
             return;
         }
         
+        if (action === 'set-ui-theme') {
+            const th = String(target.dataset.theme || 'minimal');
+            state.settings.uiTheme = th;
+            saveSettingsLocal();
+            applyUiTheme(root);
+            renderManager();
+            return;
+        }
         if (action === 'set-editor-mode') {
             const mode = String(target.getAttribute('data-mode') || target.dataset.mode || 'popup') === 'fullscreen' ? 'fullscreen' : 'popup';
             state.settings.editorMode = mode;
@@ -596,7 +916,8 @@ export function ensureRoot() {
             return;
         }
         if (action === 'jump-share') {
-            const snip = String(target.dataset.snippet || '').trim();
+            let snip = String(target.dataset.snippet || '').trim();
+            try { snip = decodeURIComponent(snip); } catch {}
             if (!snip) return;
             const rootEl = document.getElementById(ROOT_ID);
             if (!rootEl) return;
@@ -638,12 +959,17 @@ export function ensureRoot() {
             const p = getPersonaData().find(x => x.id === id);
             const label = p ? `${p.name}${p.title ? `（${p.title}）` : ''}` : id;
             (async () => {
-                const ok = await confirmDeletePersona(label, id);
+                const active = getActiveAvatarId();
+                if (active && String(active) === id) {
+                    if (!confirm('这是当前「使用中」的人设，确定删除并移入回收站？')) return;
+                }
+                const ok = await confirmDeletePersona(label + '（将进入回收站）', id);
                 if (!ok) return;
                 try {
+                    pushToTrash(snapshotPersona(id));
                     const done = await deletePersonaById(id);
                     if (done) {
-                        if (typeof toastr !== 'undefined') toastr.success(`已删除：${label}`);
+                        if (typeof toastr !== 'undefined') toastr.success(`已移入回收站：${label}`);
                     } else if (typeof toastr !== 'undefined') {
                         toastr.error('删除失败');
                     }
@@ -675,6 +1001,7 @@ export function ensureRoot() {
                 let failN = 0;
                 for (const id of ids) {
                     try {
+                        pushToTrash(snapshotPersona(id));
                         const done = await deletePersonaById(id);
                         if (done) okN += 1;
                         else failN += 1;
@@ -685,7 +1012,7 @@ export function ensureRoot() {
                 }
                 state.selected.clear();
                 if (typeof toastr !== 'undefined') {
-                    if (okN) toastr.success(`已删除 ${okN} 个` + (failN ? `，失败 ${failN} 个` : ''));
+                    if (okN) toastr.success(`已移入回收站 ${okN} 个` + (failN ? `，失败 ${failN} 个` : ''));
                     else toastr.error(`删除失败（${failN}）`);
                 }
                 state.active = true;
@@ -699,7 +1026,144 @@ export function ensureRoot() {
             })();
             return;
         }
+        if (action === 'merge-selected') {
+            const ids = [...state.selected].map(String);
+            if (ids.length !== 2) {
+                if (typeof toastr !== 'undefined') toastr.info('请选择恰好 2 个人设再缝合');
+                return;
+            }
+            openMergeDialog(ids[0], ids[1], () => {
+                state.selected.clear();
+                renderManager();
+            });
+            return;
+        }
+        if (action === 'restore-trash') {
+            const id = String(target.dataset.id || '');
+            if (restoreFromTrash(id)) {
+                if (typeof toastr !== 'undefined') toastr.success('已恢复');
+                renderManager();
+            } else if (typeof toastr !== 'undefined') toastr.error('恢复失败');
+            return;
+        }
+        if (action === 'purge-trash') {
+            const id = String(target.dataset.id || '');
+            if (!confirm('彻底删除后无法恢复，确定？')) return;
+            purgeTrashItem(id);
+            renderManager();
+            return;
+        }
+        if (action === 'empty-trash') {
+            if (!confirm('清空回收站？此操作不可恢复')) return;
+            emptyTrash();
+            renderManager();
+            return;
+        }
+        if (action === 'create-category') {
+            event.preventDefault();
+            const input = root.querySelector('#pmp18-new-cat-name');
+            const name = (input?.value || '').trim();
+            if (!name) {
+                if (typeof toastr !== 'undefined') toastr.warning('请输入分类名');
+                return;
+            }
+            const cat = createCategory(name);
+            if (!cat) {
+                if (typeof toastr !== 'undefined') toastr.warning('分类已存在或无效');
+                return;
+            }
+            if (typeof toastr !== 'undefined') toastr.success(`已创建分类「${cat.name}」`);
+            try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+            state.tab = 'categories';
+            renderManager();
+            return;
+        }
+        if (action === 'delete-category') {
+            const id = String(target.dataset.id || '');
+            if (!confirm('删除该分类？人设上的分类标记会清除')) return;
+            deleteCategoryDef(id);
+            try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+            renderManager();
+            return;
+        }
+        if (action === 'category-persona' || action === 'organize-persona') {
+            openOrganizePicker(String(target.dataset.id || ''));
+            return;
+        }
+        if (action === 'create-tag') {
+            event.preventDefault();
+            event.stopPropagation();
+            const input = root.querySelector('#pmp18-new-tag-name');
+            const name = (input?.value || '').trim();
+            if (!name) {
+                if (typeof toastr !== 'undefined') toastr.warning('请输入标签名');
+                input?.focus();
+                return;
+            }
+            const colorBtn = root.querySelector('.pmp18-tag-color.is-on') || root.querySelector('.pmp18-tag-color');
+            const color = colorBtn?.dataset?.color || TAG_COLOR_PRESETS[0];
+            const tag = createTag(name, color);
+            if (!tag) {
+                if (typeof toastr !== 'undefined') toastr.warning('标签已存在或无效');
+                return;
+            }
+            if (typeof toastr !== 'undefined') toastr.success(`已创建「${tag.name}」`);
+            try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+            state.tab = 'tags';
+            renderManager();
+            return;
+        }
+        if (action === 'pick-tag-color') {
+            root.querySelectorAll('.pmp18-tag-color').forEach(b => b.classList.remove('is-on'));
+            target.classList.add('is-on');
+            return;
+        }
+        if (action === 'delete-tag-def') {
+            const id = String(target.dataset.id || '');
+            if (!confirm('删除该标签定义？人设上的此标签也会移除')) return;
+            deleteTagDef(id);
+            if (state.filterTagId === id) state.filterTagId = null;
+            try { window.__pmp18NativeTags?.refresh?.(); } catch {}
+            renderManager();
+            return;
+        }
+        if (action === 'clear-tag-filter') {
+            state.filterTagId = null;
+            renderManager();
+            return;
+        }
+        if (action === 'filter-tag') {
+            const id = String(target.dataset.id || '');
+            state.filterTagId = state.filterTagId === id ? null : id;
+            state.tab = 'all';
+            renderManager();
+            return;
+        }
+        if (action === 'tag-persona') {
+            openOrganizePicker(String(target.dataset.id || ''));
+            return;
+        }
+        if (action === 'adopt-snippet') {
+            let snip = String(target.dataset.snippet || target.closest('[data-snippet]')?.dataset?.snippet || '').trim();
+            try { snip = decodeURIComponent(snip); } catch { /* keep raw */ }
+            if (!snip) {
+                if (typeof toastr !== 'undefined') toastr.warning('没有可采纳的内容');
+                return;
+            }
+            const baselineId = state.baselineId || state.compareIds[0];
+            if (!baselineId) {
+                if (typeof toastr !== 'undefined') toastr.warning('请先进入对比并选定基准');
+                return;
+            }
+            openAdoptDialog({
+                baselineId,
+                snippet: snip,
+                onDone: () => renderManager(),
+            });
+            return;
+        }
         if (action === 'open-update-modal') {
+
             if (root.dataset.pmp18SkipVersionClick) return;
             event.preventDefault();
             event.stopPropagation();
