@@ -6,9 +6,10 @@
   "js": "index.js",
   "css": "style.css",
   "author": "TokkiO-O",
-  "version": "1.10.2",
-  "description": "人设管理 · 分类/分组 · 标签融入原版 · 素净默认",
+  "version": "1.11.0",
+  "description": "人设管理 · 四种主题 · 采纳 / 字段缝合 / 草稿历史 / 资料备份",
   "hooks": {
     "update": "onUpdate"
   }
 }
+

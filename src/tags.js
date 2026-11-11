@@ -32,7 +32,10 @@ export function createTag(name, color) {
     const c = color || TAG_COLOR_PRESETS[defs.length % TAG_COLOR_PRESETS.length];
     const tag = { id: uid(), name: n, color: c };
     defs.push(tag);
-    saveSettingsLocal();
+    if (!saveSettingsLocal()) {
+        defs.pop();
+        throw new Error('标签未能保存，请检查浏览器存储空间后重试。');
+    }
     return tag;
 }
 
@@ -82,7 +85,7 @@ export function renderTagChipsHtml(personaId, { editable = false } = {}) {
     const tags = getTagsForPersona(personaId);
     if (!tags.length && !editable) return '';
     const chips = tags.map(t =>
-        `<span class="pmp18-tag-chip" data-tag-id="${t.id}" style="--pmp-tag:${t.color}" title="${t.name}">${escape(t.name)}</span>`
+        `<span class="pmp18-tag-chip" data-tag-id="${escape(t.id)}" style="--pmp-tag:${escape(t.color)}" title="${escape(t.name)}">${escape(t.name)}</span>`
     ).join('');
     return `<div class="pmp18-tag-row" data-persona-id="${escape(String(personaId))}">${chips}</div>`;
 }
@@ -94,3 +97,4 @@ function escape(s) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 }
+

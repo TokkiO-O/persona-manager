@@ -686,7 +686,7 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
         }
     };
 
-    for (const row of rows) {
+    for (const [rowIndex,row] of rows.entries()) {
         const textA = String(row.a || '').trim();
         const textB = String(row.b || '').trim();
         // 跳过空单元，避免「对方有 · 基准无」空壳
@@ -702,10 +702,10 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
             flushGaps();
             if (isPureSame) {
                 const lineCount = String(side === 'base' ? row.a : row.b).split('\n').length;
-                parts.push(`<div class="pmp18-col-block same" data-pmp18-same-lines="${lineCount}">${escapeHtml(side === 'base' ? row.a : row.b)}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
+                parts.push(`<div data-diff-row="${rowIndex}" class="pmp18-col-block same" data-pmp18-same-lines="${lineCount}">${escapeHtml(side === 'base' ? row.a : row.b)}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
             } else {
                 const { left, right } = inlineDiffHtml(row.a, row.b);
-                parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
+                parts.push(`<div data-diff-row="${rowIndex}" class="pmp18-col-block replace">${side === 'base' ? left : right}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
             }
             continue;
         }
@@ -713,7 +713,7 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
         if (row.type === 'remove') {
             if (side === 'base') {
                 flushGaps();
-                parts.push(`<div class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
+                parts.push(`<div data-diff-row="${rowIndex}" class="pmp18-col-block remove"><span class="pmp18-tag">仅基准</span><mark class="pmp18-del">${escapeHtml(row.a)}</mark></div>`);
             } else {
                 gapOnlyBase += 1; // 不画空壳
             }
@@ -723,7 +723,7 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
         if (row.type === 'add') {
             if (side === 'other') {
                 flushGaps();
-                parts.push(`<div class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark><button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button></div>`);
+                parts.push(`<div data-diff-row="${rowIndex}" class="pmp18-col-block add"><span class="pmp18-tag">仅对方</span><mark class="pmp18-add">${escapeHtml(row.b)}</mark><button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button></div>`);
             } else {
                 gapOnlyOther += 1;
             }
@@ -732,7 +732,7 @@ export function renderFocusBlocks(baseText, otherText, side, showDiffOnly, opts 
 
         flushGaps();
         const { left, right } = inlineDiffHtml(row.a || '', row.b || '');
-        parts.push(`<div class="pmp18-col-block replace">${side === 'base' ? left : right}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
+        parts.push(`<div data-diff-row="${rowIndex}" class="pmp18-col-block replace">${side === 'base' ? left : right}${side === 'other' && row.b ? `<button type="button" class="pmp18-share-adopt" data-action="adopt-snippet" data-snippet="${encodeURIComponent(row.b)}" title="采纳到基准">采纳</button>` : ''}</div>`);
     }
     flushGaps();
     return parts.join('') || '<div class="pmp18-muted" style="padding:12px">无内容</div>';
@@ -755,4 +755,5 @@ export function renderCompareLegend(fragmentMode, shortMode = false) {
             <span class="pmp18-legend-note">${note}</span>
         </div>`;
 }
+
 

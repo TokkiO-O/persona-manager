@@ -23,6 +23,11 @@ import {
 import { listTrash, pushToTrash, snapshotPersona, restoreFromTrash, purgeTrashItem, emptyTrash } from '../trash.js';
 import { getActiveAvatarId } from '../persona-data.js';
 import { TAG_COLOR_PRESETS } from '../constants.js';
+import { bindVisualViewport } from './dialog.js';
+import { applyTheme,refreshThemes,getThemePalette,isHexColor } from '../themes.js';
+import { renderLibraryPanel,mountLibraryPanel } from './library.js';
+import { revealCompareMatches, resetManagerFrame } from './scroll.js';
+import { openBatchOrganize } from './batch-organize.js';
 
 
 function openTagPicker(personaId) {
@@ -30,7 +35,9 @@ function openTagPicker(personaId) {
     const cur = new Set(getTagsForPersona(personaId).map(x => x.id));
     let draftColor = TAG_COLOR_PRESETS[0];
     const pick = document.createElement('div');
-    pick.className = 'pmp18-editor-overlay is-popup';
+    pick.className = `pmp18-editor-overlay is-popup pmp18-theme-${state.settings.uiTheme || 'shoujo'}`;
+    applyTheme(pick);
+    const unbindViewport = bindVisualViewport(pick);
     const paint = () => {
         const list = getTagDefs();
         const body = pick.querySelector('.pmp18-tag-picker-body');
@@ -74,7 +81,9 @@ function openTagPicker(personaId) {
                 if (typeof toastr !== 'undefined') toastr.warning('请输入标签名');
                 return false;
             }
-            const tag = createTag(name, draftColor);
+            let tag;
+            try { tag = createTag(name, draftColor); }
+            catch (error) { if (typeof toastr !== 'undefined') toastr.error(error.message); return false; }
             if (!tag) {
                 // 已存在则勾选已有
                 const exist = getTagDefs().find(t => t.name === name);
@@ -115,14 +124,16 @@ function openTagPicker(personaId) {
           <button type="button" class="pmp18-primary-btn" data-save>保存</button>
         </div>
       </div>`;
-    const close = () => pick.remove();
+    const close = () => { unbindViewport(); pick.remove(); };
     pick.addEventListener('click', e => { if (e.target === pick || e.target.closest('[data-x]')) close(); });
     pick.querySelector('[data-save]').onclick = () => {
         // 保存前：若输入框还有未添加的名字，先创建并勾选
         const input = pick.querySelector('.pmp18-tag-new-input');
         const pending = (input?.value || '').trim();
         if (pending) {
-            const tag = createTag(pending, draftColor);
+            let tag;
+            try { tag = createTag(pending, draftColor); }
+            catch (error) { if (typeof toastr !== 'undefined') toastr.error(error.message); return; }
             if (tag) cur.add(tag.id);
             else {
                 const exist = getTagDefs().find(t => t.name === pending);
@@ -152,6 +163,7 @@ export function renderSettingsPanel() {
     const soft = Math.round((state.settings.softMatchThreshold ?? 0.35) * 100);
     const editorMode = state.settings.editorMode === 'fullscreen' ? 'fullscreen' : 'popup';
     const upd = state.updateInfo;
+    const palette=getThemePalette();
     let tip = '';
     if (upd?.available) {
         tip = `<div class="pmp18-muted" style="margin-bottom:10px">发现新版本 v${escapeHtml(String(upd.remoteVersion))} — 点击左上角版本号查看并更新</div>`;
@@ -161,7 +173,7 @@ export function renderSettingsPanel() {
 
     return `
         <div class="pmp18-settings">
-            ${tip}
+            <div class="pmp18-update-status">${tip}</div>
             <div class="pmp18-settings-row">
                 <label>相似检测阈值 <b id="pmp18-th-val">${t}%</b></label>
                 <input type="range" id="pmp18-threshold" min="30" max="90" step="5" value="${t}">
@@ -188,17 +200,20 @@ export function renderSettingsPanel() {
                 <label>界面主题</label>
                 <div class="pmp18-theme-grid">
                     ${UI_THEMES.map(th => `
-                      <button type="button" class="pmp18-theme-card ${(state.settings.uiTheme || 'minimal') === th.id ? 'is-on' : ''}"
+                      <button type="button" class="pmp18-theme-card ${(state.settings.uiTheme || 'shoujo') === th.id ? 'is-on' : ''}"
                         data-action="set-ui-theme" data-theme="${th.id}" title="${escapeHtml(th.desc)}">
-                        <span class="pmp18-theme-swatch pmp18-theme-swatch--${th.id}"></span>
-                        <span class="pmp18-theme-name">${escapeHtml(th.name)}</span>
+                        <span class="pmp18-theme-swatch pmp18-theme-swatch--${th.id}" style="--theme-preview:${th.colors.accent};--theme-paper:${th.colors.bg}"></span>
+                        <span class="pmp18-theme-name">${escapeHtml(th.name)}<small>${th.english}</small><em>${th.desc}</em></span>
                       </button>`).join('')}
                 </div>
             </div>
+            <div class="pmp18-settings-row pmp18-theme-customize"><label>自定义当前风格配色</label><div class="pmp18-theme-colors">${[['accent','主题色'],['bg','背景色'],['surface','卡片色'],['ink','文字色']].map(([key,label])=>`<label><input type="color" data-theme-color="${key}" value="${palette[key]}" aria-label="${label}"><span>${label}</span></label>`).join('')}<button type="button" class="pmp18-text-btn" data-action="reset-theme-colors">恢复此风格配色</button></div><p class="pmp18-field-hint" data-theme-color-status>配色分别保留，切换风格也会保留你的选择。</p></div>
+            <div class="pmp18-settings-row pmp18-settings-update"><div><label>版本与更新</label><p class="pmp18-field-hint">当前 v${VERSION} · 可以手动检查最新版本</p></div><button type="button" class="pmp18-small-btn" data-action="check-update">检查更新</button><button type="button" class="pmp18-small-btn" data-action="open-update-modal">更新日志</button></div>
         </div>`;
 }
 
 export function renderManagerContent(personas) {
+    if (state.tab === 'library') return renderLibraryPanel();
     if (state.tab === 'settings') return renderSettingsPanel();
     if (state.tab === 'trash') return renderTrashView();
     if (state.tab === 'tags') return renderTagsManageView();
@@ -258,7 +273,9 @@ function openOrganizePicker(personaId) {
     const curTag = new Set(getTagsForPersona(personaId).map(x => x.id));
     let draftColor = (typeof TAG_COLOR_PRESETS !== 'undefined' && TAG_COLOR_PRESETS[0]) || '#e8a0b4';
     const pick = document.createElement('div');
-    pick.className = 'pmp18-editor-overlay is-popup';
+    pick.className = `pmp18-editor-overlay is-popup pmp18-theme-${state.settings.uiTheme || 'shoujo'}`;
+    applyTheme(pick);
+    const unbindViewport = bindVisualViewport(pick);
     const paint = () => {
         const body = pick.querySelector('.pmp18-org-body');
         if (!body) return;
@@ -300,7 +317,9 @@ function openOrganizePicker(personaId) {
         const addNew = () => {
             const name = (input?.value || '').trim();
             if (!name) return;
-            const tag = createTag(name, draftColor);
+            let tag;
+            try { tag = createTag(name, draftColor); }
+            catch (error) { if (typeof toastr !== 'undefined') toastr.error(error.message); return; }
             if (tag) { curTag.add(tag.id); input.value = ''; paint(); }
             else if (typeof toastr !== 'undefined') toastr.warning('标签无效或已存在');
         };
@@ -316,7 +335,7 @@ function openOrganizePicker(personaId) {
         <button type="button" class="pmp18-primary-btn" data-save>保存</button>
       </div>
     </div>`;
-    const close = () => pick.remove();
+    const close = () => { unbindViewport(); pick.remove(); };
     pick.addEventListener('click', e => { if (e.target === pick || e.target.closest('[data-x]')) close(); });
     pick.querySelector('[data-save]').onclick = () => {
         setPersonaCategories(personaId, [...curCat]);
@@ -363,27 +382,32 @@ function renderTagsManageView() {
     </div>`;
 }
 
-/** In-place update of the bottom selection hint. No full re-render, so the
- *  page never scrolls. Insert the bar if missing, remove it if no longer needed. */
+function renderSelectionHint() {
+    const n = state.selected.size;
+    return n >= 2
+        ? `<div class="pmp18-selection-bar">
+            <div><strong>已选 ${n} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
+            <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
+            ${n === 2 ? '<button class="pmp18-small-btn" data-action="merge-selected">缝合</button>' : ''}
+            <button type="button" class="pmp18-small-btn" data-action="organize-selected">批量整理</button>
+            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
+            <button class="pmp18-small-btn" data-action="clear-selection">取消选择</button>
+           </div>`
+        : n === 1
+            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>继续勾选可批量整理或对比</span></div>
+            <button type="button" class="pmp18-small-btn" data-action="organize-selected">批量整理</button>
+            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
+            <button class="pmp18-small-btn" data-action="clear-selection">取消选择</button></div>`
+            : '';
+}
+
+/** Update selection controls without rebuilding or scrolling the list. */
 export function updateSelectionHint(root) {
     if (!root) return;
     const windowEl = root.querySelector('.pmp18-window');
     if (!windowEl) return;
     let bar = windowEl.querySelector('.pmp18-selection-bar');
-    const n = state.selected.size;
-    const html = n >= 2
-        ? `<div class="pmp18-selection-bar">
-            <div><strong>已选 ${n} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
-            <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
-            ${n === 2 ? '<button class="pmp18-small-btn" data-action="merge-selected">缝合</button>' : ''}
-            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
-            <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
-           </div>`
-        : n === 1
-            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>可再选以对比，或直接删除</span></div>
-            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
-            <button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
-            : '';
+    const html = renderSelectionHint();
     if (!html) {
         if (bar) bar.remove();
         return;
@@ -409,17 +433,28 @@ export function scheduleRender() {
 }
 
 function applyUiTheme(root) {
+    applyTheme(root);
+}
+
+/** Background checks update badges without replacing dialogs or focused controls. */
+export function refreshUpdateIndicators() {
+    const root = document.getElementById(ROOT_ID);
     if (!root) return;
-    const th = state.settings?.uiTheme || 'sakura';
-    root.setAttribute('data-theme', th);
-    root.classList.remove('pmp18-theme-sakura', 'pmp18-theme-peach', 'pmp18-theme-minimal', 'pmp18-theme-y2k');
-    root.classList.add(`pmp18-theme-${th}`);
+    root.querySelectorAll('.pmp18-version-btn').forEach(button => {
+        button.innerHTML = `v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}`;
+    });
+    const status = root.querySelector('.pmp18-update-status');
+    if (status) {
+        const info = state.updateInfo;
+        status.textContent = info?.checking ? '正在检查更新…' : info?.error ? (info.message || '暂时无法检查更新') : info?.available ? `发现新版本 v${info.remoteVersion}` : info?.checked ? '当前已是最新版本' : '';
+    }
 }
 
 export function renderManager() {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
     try {
+        resetManagerFrame(root);
         applyUiTheme(root);
         renderManagerInner();
     } catch (e) {
@@ -485,20 +520,10 @@ export function renderManagerInner() {
     const focusSel = focusKey ? document.activeElement?.selectionStart : null;
     const focusEnd = focusKey ? document.activeElement?.selectionEnd : null;
 
-    const selectionHint = state.selected.size >= 2
-        ? `<div class="pmp18-selection-bar">
-            <div><strong>已选 ${state.selected.size} 个</strong><span>对比时一次细比一个对方，可切换</span></div>
-            <button class="pmp18-primary-btn" data-action="compare-selected">开始对比</button>
-            ${state.selected.size === 2 ? '<button class="pmp18-small-btn" data-action="merge-selected">缝合</button>' : ''}
-            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
-            <button class="pmp18-small-btn" data-action="clear-selection">清除</button>
-           </div>`
-        : state.selected.size === 1
-            ? `<div class="pmp18-selection-bar"><div><strong>已选 1 个</strong><span>可再选以对比，或直接删除</span></div>
-            <button class="pmp18-small-btn pmp18-danger-btn" data-action="delete-selected">删除所选</button>
-            <button class="pmp18-small-btn" data-action="clear-selection">清除</button></div>`
-            : '';
+    const selectionHint = renderSelectionHint();
 
+    const preservedDialogs = [...root.children].filter(el => el.classList.contains('pmp18-update-overlay'));
+    preservedDialogs.forEach(el => el.remove());
     root.innerHTML = `
         <div class="pmp18-backdrop" data-action="close"></div>
         <section class="pmp18-window" role="dialog" aria-modal="true">
@@ -508,7 +533,7 @@ export function renderManagerInner() {
                 <div class="pmp18-brand">
                     <div class="pmp18-brand-icon"><i class="fa-solid fa-users-viewfinder"></i></div>
                     <div>
-                        <h1>Persona Manager</h1>
+                                <h1>Persona Manager</h1>
                         <button type="button" class="pmp18-version-btn" data-action="open-update-modal" title="更新日志 / 检查更新">v${VERSION}${state.updateInfo?.available ? '<em class="pmp18-new">NEW</em>' : ''}</button>
                     </div>
                 </div>
@@ -540,12 +565,14 @@ export function renderManagerInner() {
                 ${tabButton('categories', '分类', 'fa-folder')}
                 ${tabButton('tags', '标签', 'fa-tags')}
                 ${tabButton('trash', '回收站', 'fa-trash-can', listTrash().length || undefined)}
+                ${tabButton('library', '资料', 'fa-book')}
                 ${tabButton('settings', '设置', 'fa-sliders')}
             </nav>
             <main class="pmp18-content">${renderManagerContent(personas)}</main>
             ${selectionHint}`}
             <div class="pmp18-lace-edge pmp18-lace-bottom" aria-hidden="true"></div>
         </section>`;
+    root.append(...preservedDialogs);
 
     // Restore scroll positions. Use rAF so the browser has finished layout.
     requestAnimationFrame(() => {
@@ -559,10 +586,11 @@ export function renderManagerInner() {
         applyFoldDefaults(root);
         bindGlobalKeys(root);
         applyAdaptiveInk(root);
+        mountLibraryPanel(root);
         if (focusKey) {
             const el = root.querySelector(`[data-pmp18-keep-focus="${CSS.escape(focusKey)}"]`);
             if (el) {
-                el.focus();
+                el.focus({ preventScroll: true });
                 if (focusSel != null && typeof el.setSelectionRange === 'function') {
                     try { el.setSelectionRange(focusSel, focusEnd); } catch { /* ignore */ }
                 }
@@ -585,19 +613,7 @@ function applyAdaptiveInk(root) {
     const fallbackBg = windowBg || '#ffffff';
     const ink = computeReadableInk(windowBg, fallbackBg);
     root.style.setProperty('--pmp18-ink', ink);
-    // 列表文字被主题盖成白字时，渲染后强制改回深色
-    root.querySelectorAll('.pmp18-card-name').forEach(el => {
-        el.style.setProperty('color', '#1a1a1f', 'important');
-        el.style.setProperty('-webkit-text-fill-color', '#1a1a1f', 'important');
-    });
-    root.querySelectorAll('.pmp18-card-description').forEach(el => {
-        el.style.setProperty('color', '#333333', 'important');
-        el.style.setProperty('-webkit-text-fill-color', '#333333', 'important');
-    });
-    root.querySelectorAll('.pmp18-card-sub').forEach(el => {
-        el.style.setProperty('color', '#666666', 'important');
-        el.style.setProperty('-webkit-text-fill-color', '#666666', 'important');
-    });
+    // Studio surfaces own their text colors; preserve the hierarchy defined in CSS.
 }
 
 
@@ -612,6 +628,7 @@ function bindGlobalKeys(root) {
         if (!state.active) return;
         const tag = (e.target && e.target.tagName) || '';
         if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+        if (e.key === 'Enter' && e.target?.closest('button,select,a,[role="button"],[role="link"]')) return;
         if (e.key === 'Escape') {
             if (state.compareIds.length >= 2) {
                 state.compareIds = [];
@@ -691,6 +708,12 @@ export function ensureRoot() {
         root.hidden = true;
         document.body.appendChild(root);
     }
+    if(!root.__pmp18FrameGuard){
+        root.__pmp18FrameGuard=event=>{
+            if(event.target===root||event.target.matches?.('.pmp18-window'))resetManagerFrame(root);
+        };
+        root.addEventListener('scroll',root.__pmp18FrameGuard,{capture:true,passive:true});
+    }
     if (root.dataset.bound === '1') return;
     root.dataset.bound = '1';
 
@@ -739,6 +762,7 @@ export function ensureRoot() {
             state.compareIds = [];
             state.baselineId = null;
             state.focusOtherId = null;
+            invalidatePersonaCache('tab-change');
             if (state.tab === 'settings' && !state.updateInfo?.checked) checkForUpdates();
             renderManager();
             return;
@@ -890,12 +914,18 @@ export function ensureRoot() {
         }
         
         if (action === 'set-ui-theme') {
-            const th = String(target.dataset.theme || 'minimal');
+            const th = String(target.dataset.theme || 'shoujo');
             state.settings.uiTheme = th;
             saveSettingsLocal();
             applyUiTheme(root);
+            refreshThemes();
             renderManager();
             return;
+        }
+        if(action==='reset-theme-colors'){
+            if(state.settings.themeColors)delete state.settings.themeColors[state.settings.uiTheme];
+            if(!saveSettingsLocal()&&typeof toastr!=='undefined')toastr.error('配色未能保留，请稍后重试');
+            refreshThemes();renderManager();return;
         }
         if (action === 'set-editor-mode') {
             const mode = String(target.getAttribute('data-mode') || target.dataset.mode || 'popup') === 'fullscreen' ? 'fullscreen' : 'popup';
@@ -911,8 +941,18 @@ export function ensureRoot() {
         }
         if (action === 'toggle-group-fold') {
             const key = String(target.dataset.key || '');
+            const top = target.getBoundingClientRect().top;
             state.groupFold[key] = !state.groupFold[key];
             renderManager();
+            requestAnimationFrame(() => {
+                const root = document.getElementById(ROOT_ID);
+                const button = [...(root?.querySelectorAll('[data-action="toggle-group-fold"]') || [])].find(el => el.dataset.key === key);
+                const content = root?.querySelector('.pmp18-content');
+                if (button && content) {
+                    content.scrollTop += button.getBoundingClientRect().top - top;
+                    button.focus({ preventScroll: true });
+                }
+            });
             return;
         }
         if (action === 'jump-share') {
@@ -935,12 +975,7 @@ export function ensureRoot() {
                     m.classList.remove('pmp18-flash');
                 }, 3200);
             });
-            const inOther = matched.find(m => m.closest('.pmp18-multi-other-card, .pmp18-other-col, .pmp18-obj-card'));
-            const inBase = matched.find(m => m.closest('.pmp18-multi-base-fixed, .pmp18-base-col, .pmp18-base-card'));
-            (inOther || matched[matched.length - 1]).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-            if (inBase && inBase !== inOther) {
-                try { inBase.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch { /* ignore */ }
-            }
+            revealCompareMatches(matched);
             return;
         }
 
@@ -1034,16 +1069,18 @@ export function ensureRoot() {
             }
             openMergeDialog(ids[0], ids[1], () => {
                 state.selected.clear();
-                renderManager();
+                scheduleRender();
             });
             return;
         }
         if (action === 'restore-trash') {
             const id = String(target.dataset.id || '');
-            if (restoreFromTrash(id)) {
-                if (typeof toastr !== 'undefined') toastr.success('已恢复');
-                renderManager();
-            } else if (typeof toastr !== 'undefined') toastr.error('恢复失败');
+            (async () => {
+                if (await restoreFromTrash(id)) {
+                    if (typeof toastr !== 'undefined') toastr.success('已恢复人设文字，头像可重新上传');
+                    renderManager();
+                } else if (typeof toastr !== 'undefined') toastr.error('恢复失败，回收站内容已保留');
+            })();
             return;
         }
         if (action === 'purge-trash') {
@@ -1067,7 +1104,12 @@ export function ensureRoot() {
                 if (typeof toastr !== 'undefined') toastr.warning('请输入分类名');
                 return;
             }
-            const cat = createCategory(name);
+            let cat;
+            try { cat = createCategory(name); }
+            catch (error) {
+                if (typeof toastr !== 'undefined') toastr.error(error.message);
+                return;
+            }
             if (!cat) {
                 if (typeof toastr !== 'undefined') toastr.warning('分类已存在或无效');
                 return;
@@ -1086,6 +1128,10 @@ export function ensureRoot() {
             renderManager();
             return;
         }
+        if (action === 'organize-selected') {
+            openBatchOrganize([...state.selected], renderManager, { initialKind: state.tab === 'tags' ? 'tags' : 'categories' });
+            return;
+        }
         if (action === 'category-persona' || action === 'organize-persona') {
             openOrganizePicker(String(target.dataset.id || ''));
             return;
@@ -1102,7 +1148,9 @@ export function ensureRoot() {
             }
             const colorBtn = root.querySelector('.pmp18-tag-color.is-on') || root.querySelector('.pmp18-tag-color');
             const color = colorBtn?.dataset?.color || TAG_COLOR_PRESETS[0];
-            const tag = createTag(name, color);
+            let tag;
+            try { tag = createTag(name, color); }
+            catch (error) { if (typeof toastr !== 'undefined') toastr.error(error.message); return; }
             if (!tag) {
                 if (typeof toastr !== 'undefined') toastr.warning('标签已存在或无效');
                 return;
@@ -1144,9 +1192,9 @@ export function ensureRoot() {
             return;
         }
         if (action === 'adopt-snippet') {
-            let snip = String(target.dataset.snippet || target.closest('[data-snippet]')?.dataset?.snippet || '').trim();
+            let snip = String(target.dataset.snippet || target.closest('[data-snippet]')?.dataset?.snippet || '');
             try { snip = decodeURIComponent(snip); } catch { /* keep raw */ }
-            if (!snip) {
+            if (!snip.trim()) {
                 if (typeof toastr !== 'undefined') toastr.warning('没有可采纳的内容');
                 return;
             }
@@ -1158,7 +1206,9 @@ export function ensureRoot() {
             openAdoptDialog({
                 baselineId,
                 snippet: snip,
-                onDone: () => renderManager(),
+                sourceId: target.closest('.pmp18-multi-other-card')?.dataset.id || state.focusOtherId || '',
+                sourceName: getPersonaData().find(persona=>persona.id===(target.closest('.pmp18-multi-other-card')?.dataset.id||state.focusOtherId))?.name || '',
+                onDone: () => scheduleRender(),
             });
             return;
         }
@@ -1176,7 +1226,7 @@ export function ensureRoot() {
             return;
         }
         if (action === 'check-update') {
-            checkForUpdates();
+            checkForUpdates({ force: true });
             return;
         }
         if (action === 'show-update-modal') {
@@ -1188,6 +1238,7 @@ export function ensureRoot() {
     });
 
     root.addEventListener('change', event => {
+        if(event.target.matches('[data-theme-color]')){clearTimeout(root.__pmp18ThemeTimer);if(!saveSettingsLocal()){const status=root.querySelector('[data-theme-color-status]');if(status)status.textContent='配色未能保留，请稍后重试。';}return;}
         const input = event.target.closest('input[data-action="select"]');
         if (input) {
             const id = String(input.dataset.id || input.closest('[data-persona-id]')?.dataset?.personaId || '');
@@ -1209,6 +1260,14 @@ export function ensureRoot() {
     });
 
     root.addEventListener('input', event => {
+        if(event.target.matches('[data-theme-color]')){
+            const key=event.target.dataset.themeColor,value=event.target.value;
+            if(!['accent','bg','surface','ink'].includes(key)||!isHexColor(value))return;
+            state.settings.themeColors||={};state.settings.themeColors[state.settings.uiTheme]||={};state.settings.themeColors[state.settings.uiTheme][key]=value;
+            const actual=getThemePalette();if(key==='ink'&&actual.ink!==value)state.settings.themeColors[state.settings.uiTheme].ink=actual.ink;
+            refreshThemes();const status=root.querySelector('[data-theme-color-status]');if(status)status.textContent=key==='ink'&&actual.ink!==value?'已自动调整文字颜色，保持内容清晰。':'正在保留自定义配色…';
+            clearTimeout(root.__pmp18ThemeTimer);root.__pmp18ThemeTimer=setTimeout(()=>{const ok=saveSettingsLocal();if(status?.isConnected)status.textContent=ok?'自定义配色已保留。':'配色未能保留，请稍后重试。';},180);return;
+        }
         if (event.target.id === 'pmp18-search') {
             state.query = event.target.value;
             const caret = event.target.selectionStart;
@@ -1246,81 +1305,33 @@ export function ensureRoot() {
     });
 }
 
-// TOC click handler — scroll the matching block into view and flash it.
+// Shared snippets and directory rows use the same bounded content navigation.
 function handleTocJump(target) {
-    const jump = String(target.dataset.tocJump || '');
-    const root = document.getElementById(ROOT_ID);
-    if (!root) return;
-    let sel = null;
-    if (jump.startsWith('row-')) {
-        // The TOC index and the rendered block index may not align because the
-        // TOC was built from unorderedDiff rows but the rendered blocks are
-        // post-processed (ghost + showDiffOnly filters). We do a best-effort
-        // match by counting block tags that match the type from the dataset.
-        const idx = parseInt(jump.slice(4), 10) || 0;
-        const blocks = root.querySelectorAll('.pmp18-hcol-body .pmp18-col-block');
-        // Use the visible blocks only (skip pmp18-ghost)
-        const visible = Array.from(blocks).filter(b => !b.classList.contains('pmp18-ghost'));
-        // The TOC was built from full rows; visible might differ — fall back
-        // to a best-effort by walking all blocks.
-        const candidates = Array.from(blocks);
-        sel = candidates[idx] || null;
-    } else if (jump.startsWith('share-')) {
-        // 按芯片文案匹配两侧所有 mark（不能只用 document 序的第 idx 个——那往往只在基准里）
-        const snippet = (target.textContent || '').replace(/\s+/g, ' ').trim();
-        const allMarks = Array.from(root.querySelectorAll('mark.pmp18-share'));
-        const matched = snippet
-            ? allMarks.filter(m => (m.textContent || '').replace(/\s+/g, ' ').trim() === snippet)
-            : [];
-        const idx = parseInt(jump.slice(6), 10) || 0;
-        if (matched.length) {
-            matched.forEach(m => {
-                m.classList.add('pmp18-toc-flash');
-                setTimeout(() => m.classList.remove('pmp18-toc-flash'), 3200);
-            });
-            // 优先滚到对象侧，再保证基准侧也在视野内
-            const inOther = matched.find(m => m.closest('.pmp18-multi-other-card, .pmp18-other-col, .pmp18-obj-card, [data-side="other"]'));
-            const inBase = matched.find(m => m.closest('.pmp18-multi-base-fixed, .pmp18-base-col, .pmp18-base-card, [data-side="base"]'));
-            (inOther || matched[matched.length - 1])?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-            if (inBase && inBase !== inOther) {
-                try { inBase.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' }); } catch { /* ignore */ }
-            }
-            return;
-        }
-        sel = allMarks[idx] || null;
+    const jump=String(target.dataset.tocJump||''),root=document.getElementById(ROOT_ID);
+    if(!root)return;
+    let matches=[];
+    if(/^row-\d+$/.test(jump)){
+        const index=Number(jump.slice(4));
+        matches=[...root.querySelectorAll('[data-diff-row]')].filter(block=>Number(block.dataset.diffRow)===index);
+    }else if(/^share-\d+$/.test(jump)){
+        const snippet=(target.textContent||'').replace(/\s+/g,' ').trim();
+        const marks=[...root.querySelectorAll('mark.pmp18-share')];
+        matches=marks.filter(mark=>(mark.textContent||'').replace(/\s+/g,' ').trim()===snippet);
+        if(!matches.length&&marks[Number(jump.slice(6))])matches=[marks[Number(jump.slice(6))]];
     }
-    if (!sel) return;
-    sel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    sel.classList.add('pmp18-toc-flash');
-    setTimeout(() => sel.classList.remove('pmp18-toc-flash'), 3200);
-    // Also try to highlight search matches if any
-    if (state.tocQuery) {
-        const q = state.tocQuery.toLowerCase();
-        root.querySelectorAll('.pmp18-hcol-body mark.pmp18-search-hit').forEach(m => {
-            m.outerHTML = m.innerHTML;
-        });
-        const walker = document.createTreeWalker(root.querySelector('.pmp18-hcol-body') || root, NodeFilter.SHOW_TEXT, null);
-        const nodes = [];
-        let n;
-        while ((n = walker.nextNode())) nodes.push(n);
-        for (const node of nodes) {
-            const lower = node.nodeValue.toLowerCase();
-            const i = lower.indexOf(q);
-            if (i < 0) continue;
-            const before = node.nodeValue.slice(0, i);
-            const hit = node.nodeValue.slice(i, i + q.length);
-            const after = node.nodeValue.slice(i + q.length);
-            const span = document.createElement('mark');
-            span.className = 'pmp18-search-hit';
-            span.textContent = hit;
-            const parent = node.parentNode;
-            parent.insertBefore(document.createTextNode(before), node);
-            parent.insertBefore(span, node);
-            parent.insertBefore(document.createTextNode(after), node);
-            parent.removeChild(node);
-        }
+    if(!matches.length)return;
+    matches.forEach(element=>{
+        element.classList.add('pmp18-toc-flash');
+        setTimeout(()=>element.classList.remove('pmp18-toc-flash'),3200);
+    });
+    if(state.showToc){
+        state.showToc=false;state.tocQuery='';
+        root.querySelector('.pmp18-toc-panel')?.remove();
+        root.querySelectorAll('[data-action="toggle-toc"]').forEach(button=>button.classList.remove('is-on'));
     }
+    revealCompareMatches(matches);
 }
+
 
 export function openManager(tab = 'all') {
     ensureRoot();
@@ -1335,6 +1346,9 @@ export function openManager(tab = 'all') {
     invalidatePersonaCache('openManager');
     const root = document.getElementById(ROOT_ID);
     root.hidden = false;
+    root.__pmp18ViewportCleanup?.();
+    root.__pmp18ViewportCleanup=bindVisualViewport(root);
+    resetManagerFrame(root);
     document.body.classList.add('pmp18-open');
     renderManager();
     // Merge any new avatar files ST created while we were closed
@@ -1353,10 +1367,15 @@ export function closeManager() {
     state.focusOtherId = null;
     const root = document.getElementById(ROOT_ID);
     if (root) {
+        if(root.contains(document.activeElement))document.activeElement.blur?.();
+        root.__pmp18ViewportCleanup?.();root.__pmp18ViewportCleanup=null;
         clearTimeout(root._pmp18FocusTimer);
         clearTimeout(root._pmp18BaselineTimer);
+        root.querySelectorAll('.pmp18-update-overlay').forEach(overlay => overlay.__pmp18Dispose?.());
+        root.__pmp18LibraryCleanup?.();root.__pmp18LibraryCleanup=null;
         root.hidden = true;
     }
     document.body.classList.remove('pmp18-open');
 }
+
 

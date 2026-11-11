@@ -1,4 +1,5 @@
 import { BUTTON_ID, ENTRY_MARK, EXT } from './constants.js';
+import { applyTheme } from './themes.js';
 
 /** Filled by index.js after modules load — avoids import cycle with ui/render */
 let _openManager = () => {
@@ -38,6 +39,7 @@ export function makeEntry(floating = false) {
         : 'menu_button menu_button_icon pmp18-entry';
     entry.dataset.pmp18 = ENTRY_MARK;
     entry.title = 'Persona Manager';
+    applyTheme(entry);
     entry.innerHTML = floating
         ? '<i class="fa-solid fa-users-viewfinder"></i>'
         : '<i class="fa-solid fa-users-viewfinder"></i><span>Persona Manager</span>';
@@ -110,3 +112,4 @@ export function installEntryObserver() {
     document.getElementById('persona-management-button')?.addEventListener('click', () => setTimeout(injectEntry, 200));
     document.getElementById('user-settings-button')?.addEventListener('click', () => setTimeout(injectEntry, 200));
 }
+

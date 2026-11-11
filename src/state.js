@@ -1,12 +1,13 @@
-import { STORAGE_KEY, defaultSettings } from './constants.js';
+import { STORAGE_KEY, defaultSettings, normalizeThemeId } from './constants.js';
 
 export function loadSettings() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { ...defaultSettings };
-        return { ...defaultSettings, ...JSON.parse(raw) };
+        const settings = { ...structuredClone(defaultSettings), ...(raw ? JSON.parse(raw) : {}) };
+        settings.uiTheme = normalizeThemeId(settings.uiTheme);
+        return settings;
     } catch {
-        return { ...defaultSettings };
+        return structuredClone(defaultSettings);
     }
 }
 
@@ -35,5 +36,7 @@ export const state = {
 export function saveSettingsLocal() {
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings));
-    } catch { /* ignore */ }
+        return true;
+    } catch { return false; }
 }
+

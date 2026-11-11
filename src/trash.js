@@ -1,5 +1,5 @@
 import { state, saveSettingsLocal } from './state.js';
-import { getPersonaDescription, getPersonaTitle, getPersonaData, persistPersonaFull, invalidatePersonaCache } from './persona-data.js';
+import { getPersonaDescription, getPersonaTitle, getPersonaData, getLivePowerUser, persistPersonaBatch, invalidatePersonaCache } from './persona-data.js';
 import { power_user } from '../power-user-bridge.js';
 
 function getTrash() {
@@ -79,22 +79,12 @@ export function emptyTrash() {
 }
 
 /** Restore into power_user.personas (avatar file may be gone — name/desc still restored) */
-export function restoreFromTrash(id) {
+export async function restoreFromTrash(id) {
     const item = getTrash().find(x => x.id === id);
     if (!item) return false;
     try {
-        if (!power_user.personas) power_user.personas = {};
-        power_user.personas[item.id] = item.name || item.id;
-        const ok = persistPersonaFull(item.id, item.name || item.id, item.description || '');
-        // title if structure supports
-        try {
-            if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
-            const cur = power_user.persona_descriptions[item.id];
-            if (item.title) {
-                if (cur && typeof cur === 'object') cur.title = item.title;
-                else power_user.persona_descriptions[item.id] = { description: item.description || '', title: item.title };
-            }
-        } catch { /* ignore */ }
+        if (Object.prototype.hasOwnProperty.call(getLivePowerUser()?.personas || {}, item.id)) throw new Error('同 ID 的人设已存在，已停止恢复。');
+        const ok = await persistPersonaBatch([{ id: item.id, name: item.name || item.id, description: item.description || '', metadata: { title: item.title || '' } }], { allowCreate: true });
         purgeTrashItem(id);
         invalidatePersonaCache('restoreFromTrash');
         return ok;
@@ -103,3 +93,4 @@ export function restoreFromTrash(id) {
         return false;
     }
 }
+

@@ -1,7 +1,7 @@
 /** Shared constants for Persona Manager */
 
 export const EXT = 'Persona Manager';
-export const VERSION = '1.10.2';
+export const VERSION = '1.11.0';
 export const ROOT_ID = 'pmp18-root';
 export const BUTTON_ID = 'pmp18-entry';
 export const ENTRY_MARK = 'pmp18-entry-installed';
@@ -54,13 +54,18 @@ export const TAG_COLOR_PRESETS = [
     '#FFB7B2', '#FFDAC1', '#B5EAD7', '#C7CEEA', '#FEC8D8',
 ];
 
-/** uiTheme: sakura | peach | minimal | y2k */
+/** Four visual styles; user palettes are stored separately per style. */
 export const UI_THEMES = [
-    { id: 'sakura', name: '樱粉', desc: '玫粉 · 蕾丝 · 华丽' },
-    { id: 'peach', name: '蜜桃清透', desc: '浅桃 · 简洁圆角' },
-    { id: 'minimal', name: '素净', desc: '留白 · 细线' },
-    { id: 'y2k', name: '千禧粉', desc: '亮粉 · 渐变光感' },
+    { id: 'clay', name: '粘土拟态', english: 'Claymorphism', desc: '柔软体积 · 圆润浮雕', colors: { accent: '#b77d94', bg: '#f0e6ed', surface: '#faf3f8', ink: '#594653' } },
+    { id: 'ghibli', name: '吉卜力风格', english: 'Ghibli Style', desc: '森林色调 · 手绘纸感', colors: { accent: '#6a8264', bg: '#eeeede', surface: '#fcf9ed', ink: '#3e4b3b' } },
+    { id: 'watercolor', name: '水彩艺术', english: 'Watercolor Art', desc: '轻柔晕染 · 透光水色', colors: { accent: '#947cae', bg: '#f3eef8', surface: '#fffdfd', ink: '#594c68' } },
+    { id: 'shoujo', name: '少女漫画', english: 'Shoujo Manga', desc: '网点星光 · 花边分镜', colors: { accent: '#c4648c', bg: '#fff1f7', surface: '#fffcfe', ink: '#57394a' } },
 ];
+
+export function normalizeThemeId(id) {
+    const legacy = { sakura: 'shoujo', peach: 'clay', minimal: 'ghibli', y2k: 'watercolor' };
+    return UI_THEMES.some(theme => theme.id === id) ? id : legacy[id] || 'shoujo';
+}
 
 export const defaultSettings = {
     similarityThreshold: 0.55,
@@ -68,7 +73,8 @@ export const defaultSettings = {
     showDiffOnly: false,
     softMatchThreshold: 0.35,
     editorMode: 'popup',
-    uiTheme: 'sakura',
+    uiTheme: 'shoujo',
+    themeColors: {},
     /** @type {{ id: string, name: string, color: string }[]} */
     tagDefs: [],
     /** @type {Record<string, string[]>} personaId -> tagId[] */
@@ -94,3 +100,4 @@ export const SHORT_TEXT_THRESHOLD = 300;
 /** When folding identical chunks, fold when this many consecutive lines
  *  are marked 'same' (and content is purely identical, not inline-diff). */
 export const FOLD_SAME_MIN_LINES = 3;
+

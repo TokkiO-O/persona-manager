@@ -1,9 +1,10 @@
-import { power_user } from '../power-user-bridge.js';
+import { power_user, getHostAvatarId, getHostContext, getHostSave, initializeHostBridge, syncHostPersonaName } from '../power-user-bridge.js';
 import { EXT } from './constants.js';
 import { state } from './state.js';
 import { normalizeText } from './util.js';
 import { invalidateGroupMemo } from './similarity.js';
 import { getStRequestHeaders } from './update.js';
+import { stageRevisionBatch, finishRevisionBatch } from './library-store.js';
 
 function hasPowerUser() {
     try {
@@ -14,7 +15,7 @@ function hasPowerUser() {
 }
 
 /** Prefer live module binding; fall back to getContext().powerUserSettings */
-function getLivePowerUser() {
+export function getLivePowerUser() {
     try {
         if (power_user && typeof power_user === 'object' && power_user.personas) return power_user;
     } catch { /* ignore */ }
@@ -56,13 +57,8 @@ export function getPersonaTitle(raw) {
 }
 
 export function getActiveAvatarId() {
-    try {
-        if (power_user?.user_avatar) return String(power_user.user_avatar);
-    } catch { /* ignore */ }
-    try {
-        if (window.user_avatar) return String(window.user_avatar);
-    } catch { /* ignore */ }
-    return '';
+    try { return getHostAvatarId() || String(getLivePowerUser()?.user_avatar || ''); }
+    catch { return ''; }
 }
 
 /* ---------- 人设数据：读 / 写 / 删（带缓存） ---------- */
@@ -131,7 +127,7 @@ export async function syncPersonasFromAvatarFiles() {
                 }
             }
             if (removed) {
-                savePowerUserSettings();
+                await savePowerUserSettings();
                 console.log(`[${EXT}] removed ${removed} stale Unnamed placeholder(s)`);
             }
         }
@@ -152,18 +148,9 @@ export async function syncPersonasFromAvatarFiles() {
  */
 function personaStoreSig(pu) {
     if (!pu?.personas) return '';
-    // ids + name lengths + description lengths — cheap change detector
     const ids = Object.keys(pu.personas).sort();
-    let s = `${ids.length}|`;
     const descs = pu.persona_descriptions || {};
-    for (const id of ids) {
-        const name = pu.personas[id];
-        const d = descs[id];
-        const dlen = d == null ? 0 : (typeof d === 'string' ? d.length : (d.description || '').length);
-        const tlen = d && typeof d === 'object' ? String(d.title || '').length : 0;
-        s += `${id}:${String(name || '').length}:${dlen}:${tlen};`;
-    }
-    return s;
+    return JSON.stringify(ids.map(id => [id, pu.personas[id], getPersonaDescription(descs[id]), getPersonaTitle(descs[id])]));
 }
 
 export function getPersonaData() {
@@ -195,8 +182,9 @@ export function getPersonaData() {
             descriptionKey: normalizeText(description),
         };
     });
-    _personaCache = { items, sig, version: ++_personaVersion };
-    return items;
+    const frozen = Object.freeze(items.map(item => Object.freeze(item)));
+    _personaCache = { items: frozen, sig, version: ++_personaVersion };
+    return frozen;
 }
 
 export function formatPersonaSubline(persona) {
@@ -207,28 +195,21 @@ export function formatPersonaSubline(persona) {
     return `${id.slice(0, 8)}…${id.slice(-6)}`;
 }
 
-export function savePowerUserSettings() {
-    try {
-        if (typeof window.saveSettingsDebounced === 'function') {
-            window.saveSettingsDebounced();
-            return;
-        }
-    } catch { /* ignore */ }
-    try {
-        if (typeof window.saveSettings === 'function') window.saveSettings();
-    } catch { /* ignore */ }
+export async function savePowerUserSettings() {
+    await getHostSave()();
+    return true;
 }
 
 export function emitPersonaUpdated(id) {
     try {
-        const ctx = window.SillyTavern?.getContext?.();
+        const ctx = getHostContext();
         const es = ctx?.eventSource;
         const types = ctx?.eventTypes || ctx?.event_types;
         if (es?.emit && types?.PERSONA_UPDATED) {
-            es.emit(types.PERSONA_UPDATED, id);
+            Promise.resolve(es.emit(types.PERSONA_UPDATED, id)).catch(console.error);
             return;
         }
-        if (es?.emit) es.emit('PERSONA_UPDATED', id);
+        if (es?.emit) Promise.resolve(es.emit('persona_updated', id)).catch(console.error);
     } catch { /* ignore */ }
 }
 
@@ -236,62 +217,101 @@ export function emitPersonaUpdated(id) {
  * Write ONLY this avatar id.
  * Never copy edited text onto the currently selected persona unless ids match.
  */
-export function persistPersonaDescription(targetId, description) {
-    const id = String(targetId || '');
-    if (!id || !hasPowerUser()) {
-        console.error(`[${EXT}] persist blocked: invalid id`, targetId);
-        return false;
+let writeQueue = Promise.resolve();
+
+/** One settings save for the whole batch; unchanged sides are never rewritten. */
+export function persistPersonaBatch(changes, options = {}) {
+    const operation = writeQueue.then(() => writePersonaBatch(changes, options));
+    writeQueue = operation.catch(() => {});
+    return operation;
+}
+
+async function writePersonaBatch(changes, { allowCreate = false } = {}) {
+    await initializeHostBridge();
+    const pu = getLivePowerUser();
+    if (!pu) throw new Error('暂时无法读取酒馆人设，请稍后重试。');
+    const save = getHostSave();
+    const seen = new Set();
+    const prepared = changes.map(change => {
+        const id = String(change.id || '');
+        if (!id || seen.has(id)) throw new Error('目标人设 ID 无效或重复。');
+        seen.add(id);
+        const exists = Object.prototype.hasOwnProperty.call(pu.personas || {}, id);
+        if (!exists && !allowCreate) throw new Error('此人设已被删除，保存已停止。');
+        const previousName = pu.personas?.[id];
+        const previous = pu.persona_descriptions?.[id];
+        if (change.expected && (String(previousName ?? id) !== change.expected.name || getPersonaDescription(previous) !== change.expected.description || Object.prototype.hasOwnProperty.call(change.expected,'rawMetadata')&&JSON.stringify(previous)!==JSON.stringify(change.expected.rawMetadata))) {
+            throw new Error('此人设已在别处修改。请保留当前草稿，重新打开后再合并。');
+        }
+        const nextName = String(change.name ?? previousName ?? id);
+        const base = previous && typeof previous === 'object' && !Array.isArray(previous) ? previous : {};
+        const next = { ...base, ...change.metadata, description: String(change.description ?? '') };
+        return { id, exists, previousName, previous, previousFingerprint: JSON.stringify([previousName,previous]), hadDescription: Object.prototype.hasOwnProperty.call(pu.persona_descriptions || {}, id), nextName, next, audit: change.audit || [], reason: change.reason || '编辑保存' };
+    }).filter(item => !item.exists || item.nextName !== item.previousName || JSON.stringify(item.next) !== JSON.stringify(item.previous));
+    if (!prepared.length) return true;
+    const batchId = await stageRevisionBatch(prepared.map(item => ({
+        personaId: item.id,
+        before: item.exists ? { name: String(item.previousName ?? item.id), description: getPersonaDescription(item.previous), metadata: structuredClone(item.previous && typeof item.previous === 'object' && !Array.isArray(item.previous) ? item.previous : {}) } : null,
+        after: { name: item.nextName, description: item.next.description, metadata: structuredClone(item.next) },
+        audit: item.audit, reason: item.reason,
+    })));
+    if (getLivePowerUser() !== pu || prepared.some(item => JSON.stringify([pu.personas?.[item.id],pu.persona_descriptions?.[item.id]]) !== item.previousFingerprint)) {
+        await finishRevisionBatch(batchId, false);
+        throw new Error('人设在准备保存时已被修改，草稿已保留，请重新对照。');
     }
-    if (!power_user.persona_descriptions) power_user.persona_descriptions = {};
-
-    const prev = power_user.persona_descriptions[id];
-    let base = {};
-    if (prev && typeof prev === 'object' && !Array.isArray(prev)) {
-        base = { ...prev };
-    } else if (typeof prev === 'string') {
-        base = { description: prev };
-    }
-
-    const nextText = String(description ?? '');
-    power_user.persona_descriptions[id] = {
-        ...base,
-        description: nextText,
-    };
-
-    // Only touch the native textarea when editing the ACTIVE persona
+    pu.personas ||= {};
+    pu.persona_descriptions ||= {};
     const activeId = getActiveAvatarId();
-    if (activeId && activeId === id) {
-        try {
-            const ta = document.querySelector('#persona_description, textarea[name="persona_description"], #persona-description-textarea');
-            if (ta && typeof ta.value === 'string') {
-                ta.value = nextText;
-                ta.dispatchEvent(new Event('input', { bubbles: true }));
-                ta.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            // Keep global "current description" field in sync only for active
-            if (typeof power_user.persona_description === 'string') {
-                power_user.persona_description = nextText;
-            }
-        } catch { /* ignore */ }
+    const oldActive = pu.persona_description;
+    const active = prepared.find(item => item.id === activeId);
+    for (const item of prepared) {
+        pu.personas[item.id] = item.nextName;
+        pu.persona_descriptions[item.id] = item.next;
     }
-
-    console.log(`[${EXT}] wrote description for id=${id} (active=${activeId || 'none'}) len=${nextText.length}`);
-    savePowerUserSettings();
-    invalidatePersonaCache('persistPersonaDescription');
-    emitPersonaUpdated(id);
+    if (active) pu.persona_description = active.next.description;
+    try {
+        await save();
+    } catch (error) {
+        for (const item of prepared) {
+            if (pu.persona_descriptions[item.id] !== item.next) continue;
+            if (item.hadDescription) pu.persona_descriptions[item.id] = item.previous;
+            else delete pu.persona_descriptions[item.id];
+            if (pu.personas[item.id] === item.nextName) {
+                if (item.exists) pu.personas[item.id] = item.previousName;
+                else delete pu.personas[item.id];
+            }
+        }
+        if (active && pu.persona_description === active.next.description) pu.persona_description = oldActive;
+        invalidatePersonaCache('save-failed');
+        await finishRevisionBatch(batchId, false).catch(console.error);
+        throw new Error(`保存失败，草稿仍保留：${error?.message || error}`);
+    }
+    try { await finishRevisionBatch(batchId, true); }
+    catch (error) {
+        console.warn(`[${EXT}] history finalization`, error);
+        if (typeof toastr !== 'undefined') toastr.warning('人设已写回，版本快照保留待核对。请到资料页检查。');
+    }
+    if (active) {
+        const ta = document.querySelector('#persona_description, textarea[name="persona_description"], #persona-description-textarea');
+        if (ta && ta.value !== active.next.description) {
+            ta.value = active.next.description;
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (active.nextName !== active.previousName) {
+            try { syncHostPersonaName(active.nextName); } catch (error) { console.warn(`[${EXT}] name UI sync`, error); }
+        }
+    }
+    invalidatePersonaCache('persistPersonaBatch');
+    prepared.forEach(item => emitPersonaUpdated(item.id));
     return true;
 }
 
-export function persistPersonaFull(targetId, name, description) {
-    const id = String(targetId || '');
-    if (!id || !hasPowerUser()) {
-        console.error(`[${EXT}] persistFull blocked: invalid id`, targetId);
-        return false;
-    }
-    if (!power_user.personas) power_user.personas = {};
-    power_user.personas[id] = String(name ?? id);
-    console.log(`[${EXT}] wrote name for id=${id}`);
-    return persistPersonaDescription(id, description);
+export function persistPersonaDescription(targetId, description, options = {}) {
+    return persistPersonaBatch([{ id: targetId, description, ...options }]);
+}
+
+export function persistPersonaFull(targetId, name, description, options = {}) {
+    return persistPersonaBatch([{ id: targetId, name, description, ...options }]);
 }
 
 export async function deletePersonaById(targetId) {
@@ -365,11 +385,7 @@ export async function deletePersonaById(targetId) {
         state.focusOtherId = state.compareIds.find(x => x !== state.baselineId) || null;
     }
 
-    savePowerUserSettings();
-    try {
-        const ctx = window.SillyTavern?.getContext?.();
-        if (typeof ctx?.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-    } catch { /* ignore */ }
+    await savePowerUserSettings();
 
     invalidatePersonaCache('deletePersonaById');
 
@@ -431,4 +447,5 @@ function escapeHtmlSafe(v) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;');
 }
+
 

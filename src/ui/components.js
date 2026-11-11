@@ -76,11 +76,11 @@ export function renderCard(persona, all) {
         </article>`;
 }
 
-export function renderGroup(group, title, all) {
-    const key = `g-${title}`;
-    const folded = !!state.groupFold[key] && group.length > 4;
-    const show = folded ? group.slice(0, 4) : group;
-    return `<section class="pmp18-group">
+export function renderGroup(group, title, all, identity = title) {
+    const key = `group-${identity}`;
+    const folded = !!state.groupFold[key];
+    const bodyId = `pmp18-group-${encodeURIComponent(key)}`;
+    return `<section class="pmp18-group ${folded ? 'is-folded' : 'is-open'}" data-group-key="${escapeHtml(key)}">
         <div class="pmp18-group-head">
             <div>
                 <div class="pmp18-group-title">${escapeHtml(title)}</div>
@@ -88,10 +88,10 @@ export function renderGroup(group, title, all) {
             </div>
             <div class="pmp18-group-actions">
                 <button type="button" class="pmp18-small-btn" data-action="select-group" data-ids="${group.map(p => escapeHtml(p.id)).join('|')}">全选</button>
-                ${group.length > 4 ? `<button type="button" class="pmp18-small-btn" data-action="toggle-group-fold" data-key="${escapeHtml(key)}">${folded ? '展开全部' : '收起'}</button>` : ''}
+                <button type="button" class="pmp18-small-btn" data-action="toggle-group-fold" data-key="${escapeHtml(key)}" aria-expanded="${!folded}" aria-controls="${escapeHtml(bodyId)}" aria-label="${escapeHtml((folded ? '展开' : '收起') + '分组：' + title)}">${folded ? '展开全部' : '收起'}</button>
             </div>
         </div>
-        <div class="pmp18-group-grid">${show.map(p => renderCard(p, all)).join('')}</div>
+        <div class="pmp18-group-grid" id="${escapeHtml(bodyId)}" ${folded ? 'hidden' : ''}>${folded ? '' : group.map(p => renderCard(p, all)).join('')}</div>
     </section>`;
 }
 
@@ -129,12 +129,12 @@ export function renderAllView(personas) {
 
 export function renderSameNameView(personas) {
     const groups = getSameNameGroups(personas).map(g => g.filter(p => searchMatch(p, state.query))).filter(g => g.length > 1);
-    return groups.length ? groups.map(g => renderGroup(g, g[0].name, personas)).join('') : emptyState('没有同名分组', '同名超过 1 个时会在这里聚合，方便去重');
+    return groups.length ? groups.map(g => renderGroup(g, g[0].name, personas, 'name-' + g[0].nameKey)).join('') : emptyState('没有同名分组', '同名超过 1 个时会在这里聚合，方便去重');
 }
 
 export function renderDuplicateView(personas) {
     const groups = getExactDuplicateGroups(personas).map(g => g.filter(p => searchMatch(p, state.query))).filter(g => g.length > 1);
-    return groups.length ? groups.map((g, i) => renderGroup(g, `重复组 ${i + 1}`, personas)).join('') : emptyState('没有完全重复', '描述文本完全一致的人设会显示在这里');
+    return groups.length ? groups.map((g, i) => renderGroup(g, `重复组 ${i + 1}`, personas, 'duplicate-' + g.map(p => p.id).sort()[0])).join('') : emptyState('没有完全重复', '描述文本完全一致的人设会显示在这里');
 }
 
 export function renderSimilarView(personas) {
@@ -188,3 +188,4 @@ export function renderUnclassifiedView(personas) {
         </section>`;
     }).join('')}</div>`;
 }
+

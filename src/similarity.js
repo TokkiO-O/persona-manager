@@ -1,12 +1,12 @@
 import { state } from './state.js';
 import { groupBy, normalizeText } from './util.js';
 
+const listSignatures = new WeakMap();
 function personaListSig(personas) {
-    let s = `${personas.length}|`;
-    for (const p of personas) {
-        s += `${p.id}|${p.nameKey}|${(p.descriptionKey || '').length}|${(p.description || '').length};`;
-    }
-    return s;
+    if (Object.isFrozen(personas) && listSignatures.has(personas)) return listSignatures.get(personas);
+    const sig = JSON.stringify(personas.map(p => [p.id, p.nameKey, p.descriptionKey, p.description]));
+    if (Object.isFrozen(personas)) listSignatures.set(personas, sig);
+    return sig;
 }
 
 let _sameNameMemo = null;
@@ -94,3 +94,4 @@ export function similarity(a, b) {
     const union = ax.size + by.size - intersection;
     return union ? intersection / union : 0;
 }
+

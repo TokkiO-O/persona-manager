@@ -1,4 +1,5 @@
 import { state, saveSettingsLocal } from './state.js';
+import { applyOrganizeBatch } from './organize.js';
 
 function uid() {
     return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -46,7 +47,10 @@ export function createCategory(name) {
     if (defs.some(c => c.name === n)) return null;
     const cat = { id: uid(), name: n };
     defs.push(cat);
-    saveSettingsLocal();
+    if (!saveSettingsLocal()) {
+        defs.pop();
+        throw new Error('分类未能保存，请检查浏览器存储空间后重试。');
+    }
     return cat;
 }
 
@@ -69,6 +73,11 @@ export function setPersonaCategories(personaId, categoryIds) {
     saveSettingsLocal();
 }
 
+/** Commit a batch once so every selected persona keeps its own existing groups. */
+export function applyCategoryBatch(personaIds, categoryIds, mode = 'add') {
+    return applyOrganizeBatch(personaIds, { categories: { ids: categoryIds, mode } }).changed;
+}
+
 /** @deprecated */
 export function setPersonaCategory(personaId, categoryId) {
     if (!categoryId) setPersonaCategories(personaId, []);
@@ -79,3 +88,4 @@ export function personasInCategory(categoryId) {
     const map = getCategoryMap();
     return Object.keys(map).filter(pid => (map[pid] || []).includes(categoryId));
 }
+

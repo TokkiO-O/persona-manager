@@ -1,10 +1,10 @@
 import { state } from '../state.js';
-import { escapeHtml } from '../util.js';
+import { escapeHtml, normalizeText } from '../util.js';
 import { similarity } from '../similarity.js';
 import {
     unorderedDiff, countPairStats, diffModeClass, shouldUseFragmentMode,
     isShortText, extractSharedSnippets, renderFragmentCompare, renderFocusBlocks,
-    renderCompareLegend, highlightSnippets,
+    renderCompareLegend, highlightSnippets, splitSentences,
 } from '../diff.js';
 import { formatPersonaSubline } from '../persona-data.js';
 import { renderAvatar, emptyState } from './components.js';
@@ -247,18 +247,19 @@ function renderTocPanel(fragmentMode, shortMode, baseText, otherText) {
             ? shared.filter(s => s.toLowerCase().includes(query))
             : shared;
         listHtml = filtered.length
-            ? `<div class="pmp18-toc-chips">${filtered.map((s, i) => `<span class="pmp18-toc-chip" data-toc-jump="share-${i}">${escapeHtml(s)}</span>`).join('')}</div>`
+            ? `<div class="pmp18-toc-chips">${filtered.map((s, i) => `<button type="button" class="pmp18-toc-chip" data-action="toc-jump" data-toc-jump="share-${i}">${escapeHtml(s)}</button>`).join('')}</div>`
             : `<div class="pmp18-muted">${query ? '无匹配片段' : '无共同片段'}</div>`;
     } else {
-        const rows = unorderedDiff(baseText, otherText);
+        const rows = unorderedDiff(shortMode?splitSentences(baseText).join('\n'):baseText,shortMode?splitSentences(otherText).join('\n'):otherText).map((row,index)=>({...row,index}));
+        const visibleRows=rows.filter(row=>(String(row.a||'').trim()||String(row.b||'').trim())&&!(state.settings.showDiffOnly&&row.type==='same'&&(row.a===row.b||normalizeText(row.a)===normalizeText(row.b))));
         const filtered = query
-            ? rows.filter(r => (String(r.a || '') + ' ' + String(r.b || '')).toLowerCase().includes(query))
-            : rows;
+            ? visibleRows.filter(r => (String(r.a || '') + ' ' + String(r.b || '')).toLowerCase().includes(query))
+            : visibleRows;
         const items = filtered.slice(0, 60).map((r, i) => {
             const t = r.type;
             const label = t === 'same' ? '同' : t === 'replace' ? '改' : t === 'remove' ? '仅基准' : t === 'add' ? '仅对方' : t;
             const preview = String(r.a || r.b || '').replace(/\s+/g, ' ').slice(0, 28);
-            return `<button type="button" class="pmp18-toc-item pmp18-toc-${t}" data-toc-jump="row-${i}"><span class="pmp18-toc-badge">${label}</span><span class="pmp18-toc-preview">${escapeHtml(preview)}</span></button>`;
+            return `<button type="button" data-action="toc-jump" class="pmp18-toc-item pmp18-toc-${t}" data-toc-jump="row-${r.index}"><span class="pmp18-toc-badge">${label}</span><span class="pmp18-toc-preview">${escapeHtml(preview)}</span></button>`;
         });
         listHtml = items.length
             ? items.join('')
@@ -274,3 +275,4 @@ function renderTocPanel(fragmentMode, shortMode, baseText, otherText) {
             <div class="pmp18-toc-body">${listHtml}</div>
         </aside>`;
 }
+

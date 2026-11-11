@@ -109,3 +109,4 @@ export function computeReadableInk(bg, fallbackBg = null) {
     const L = relativeLuminance(color.r, color.g, color.b);
     return L > 0.45 ? '#1a1a1f' : '#f4f4f0';
 }
+

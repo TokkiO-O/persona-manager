@@ -1,6 +1,8 @@
 import { EXT, VERSION, ROOT_ID, REMOTE_MANIFEST_URLS, REMOTE_CHANGELOG_URLS } from './constants.js';
 import { state } from './state.js';
 import { escapeHtml, isRemoteNewer, compareSemver, computeReadableInk } from './util.js';
+import { bindVisualViewport } from './ui/dialog.js';
+import { applyTheme } from './themes.js';
 
 
 let _uiRefresh = () => {};
@@ -14,27 +16,31 @@ function refreshUi() {
 
 /* ---------- 更新检查（远程 manifest + CHANGELOG） ---------- */
 
-export async function fetchText(url) {
+export async function fetchText(url, { signal, timeoutMs = 4000 } = {}) {
     const sep = url.includes('?') ? '&' : '?';
     // jsDelivr ignores random query on some paths; still helps GitHub raw CDN
     const u = `${url}${sep}t=${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
+    const ctrl = new AbortController();
+    const abort = () => ctrl.abort();
+    if (signal?.aborted) ctrl.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(abort, timeoutMs);
     try {
         const r = await fetch(u, {
             method: 'GET',
             mode: 'cors',
             cache: 'no-store',
             credentials: 'omit',
-            signal: ctrl?.signal,
+            signal: ctrl.signal,
             headers: {
                 'Accept': 'application/json,text/plain,*/*',
             },
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
+        return await r.text();
     } finally {
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
     }
 }
 
@@ -132,79 +138,83 @@ export async function updateViaApi(payload) {
     }
 }
 
-export async function checkForUpdates(options = {}) {
-    const silent = Boolean(options?.silent);
-    if (!silent) {
-        state.updateInfo = { ...(state.updateInfo || {}), checking: true };
-        if (state.tab === 'settings') refreshUi();
-    }
+const UPDATE_CACHE_MS = 15 * 60 * 1000;
+let manifestFlight = null;
+let changelogFlight = null;
+
+async function loadManifest() {
+    const ctrl = new AbortController();
+    const deadline = setTimeout(() => ctrl.abort(), 8000);
+    state.updateInfo = { ...(state.updateInfo || {}), checking: true };
     try {
-        const manifestResults = [];
-        for (const url of REMOTE_MANIFEST_URLS) {
-            try {
-                const text = await fetchText(url);
-                const remote = JSON.parse(text);
-                const rv = String(remote.version || '');
-                if (rv) manifestResults.push({ remote, rv, url });
-            } catch (e) {
-                console.warn(`[${EXT}] manifest mirror fail`, url, e?.message || e);
+        let cursor = 0;
+        const results = [];
+        const worker = async () => {
+            while (cursor < REMOTE_MANIFEST_URLS.length && !ctrl.signal.aborted) {
+                const url = REMOTE_MANIFEST_URLS[cursor++];
+                try {
+                    const remote = JSON.parse(await fetchText(url, { signal: ctrl.signal }));
+                    const rv = String(remote.version || '');
+                    if (/^v?\d+\.\d+\.\d+(?:[-+].*)?$/i.test(rv)) results.push({ remote, rv, url });
+                } catch { /* Another mirror may still succeed. */ }
             }
-        }
-        if (!manifestResults.length) throw new Error('全部更新源均失败');
-        manifestResults.sort((a, b) => compareSemver(b.rv, a.rv));
-        const best = manifestResults[0];
-        const rv = best.rv;
-        const remote = best.remote;
-        const available = Boolean(rv && isRemoteNewer(rv, VERSION));
+        };
+        await Promise.all([worker(), worker(), worker()]);
+        if (!results.length) throw new Error('更新源暂时不可用，可以稍后重试。');
+        results.sort((a, b) => compareSemver(b.rv, a.rv));
+        const best = results[0], previous = state.updateInfo || {};
+        state.updateInfo = {
+            checked: true, checking: false, error: false,
+            available: isRemoteNewer(best.rv, VERSION), remoteVersion: best.rv,
+            source: best.url, description: best.remote.description || '',
+            changelog: previous.remoteVersion === best.rv ? previous.changelog || '' : '',
+            changelogSource: previous.remoteVersion === best.rv ? previous.changelogSource || '' : '',
+            sourcesTried: results.map(result => result.rv), fetchedAt: Date.now(),
+        };
+    } catch (error) {
+        state.updateInfo = { ...(state.updateInfo || {}), checking: false, checked: true, error: true, message: error.message, fetchedAt: Date.now() };
+    } finally { clearTimeout(deadline); }
+    return state.updateInfo;
+}
 
-        // Changelog: try all mirrors, prefer text whose first/matching section contains best version
-        let changelog = '';
-        let changelogSource = '';
-        const logCandidates = [];
-        for (const url of REMOTE_CHANGELOG_URLS) {
+async function loadChangelog(info) {
+    const ctrl = new AbortController();
+    const deadline = setTimeout(() => ctrl.abort(), 8000);
+    const preferred = REMOTE_MANIFEST_URLS.indexOf(info.source);
+    const urls = [...new Set([REMOTE_CHANGELOG_URLS[preferred], ...REMOTE_CHANGELOG_URLS].filter(Boolean))];
+    let fallback = null;
+    try {
+        for (const url of urls) {
+            if (ctrl.signal.aborted) break;
             try {
-                const text = await fetchText(url);
-                if (text) logCandidates.push({ text, url });
-            } catch (e) {
-                console.warn(`[${EXT}] changelog mirror fail`, url, e?.message || e);
-            }
+                const text = await fetchText(url, { signal: ctrl.signal });
+                if (!/^\s*#/.test(text)) continue;
+                fallback ||= { text, url };
+                if (!text.includes(info.remoteVersion)) continue;
+                fallback = { text, url }; break;
+            } catch { /* Keep the cached manifest usable when a log mirror fails. */ }
         }
-        if (logCandidates.length) {
-            const scored = logCandidates.map(c => {
-                const hasVer = c.text.includes(rv) || c.text.includes(`v${rv}`) || c.text.includes(`V${rv}`);
-                return { ...c, hasVer };
-            });
-            scored.sort((a, b) => Number(b.hasVer) - Number(a.hasVer));
-            changelog = scored[0].text;
-            changelogSource = scored[0].url;
-        } else {
-            changelog = remote.description || '（无法获取 CHANGELOG.md）';
+        if (state.updateInfo?.remoteVersion === info.remoteVersion) {
+            state.updateInfo = { ...state.updateInfo, changelog: fallback?.text || info.description || '暂时无法获取更新日志。', changelogSource: fallback?.url || '', changelogFetchedAt: Date.now() };
         }
+    } finally { clearTimeout(deadline); }
+}
 
-        state.updateInfo = {
-            checked: true,
-            available,
-            remoteVersion: rv,
-            changelog,
-            source: best.url,
-            changelogSource,
-            sourcesTried: manifestResults.map(r => r.rv),
-            error: false,
-            fetchedAt: Date.now(),
-        };
-        console.log(`[${EXT}] update check best=`, rv, 'manifest@', best.url, 'changelog@', changelogSource);
-    } catch (e) {
-        const msg = e?.message || String(e);
-        state.updateInfo = {
-            checked: true,
-            available: false,
-            error: true,
-            message: msg,
-            hint: '浏览器无法访问外网更新源。扩展可照常使用，请到 GitHub 手动下载覆盖安装。',
-        };
-        console.error(`[${EXT}] update check failed`, e);
+export async function checkForUpdates(options = {}) {
+    const cached = state.updateInfo;
+    const ttl = cached?.error ? 60000 : UPDATE_CACHE_MS;
+    const fresh = cached?.checked && Date.now() - (cached.fetchedAt || 0) < ttl;
+    if (manifestFlight) await manifestFlight;
+    else if (options.force || !fresh) {
+        manifestFlight = loadManifest().finally(() => { manifestFlight = null; });
+        if (!options.silent && !options.skipRefresh) refreshUi();
+        await manifestFlight;
     }
-    if (state.active && !options?.skipRefresh) refreshUi();
+    if (options.includeChangelog && !state.updateInfo?.error && !state.updateInfo?.changelog) {
+        if (!changelogFlight) changelogFlight = loadChangelog(state.updateInfo).finally(() => { changelogFlight = null; });
+        await changelogFlight;
+    }
+    if (state.active && !options.skipRefresh) refreshUi();
     return state.updateInfo;
 }
 
@@ -236,16 +246,17 @@ export function extractChangelogForVersion(md, version) {
 }
 
 export async function showUpdateModal() {
-    document.querySelectorAll('.pmp18-update-overlay').forEach(el => el.remove());
+    document.querySelectorAll('.pmp18-update-overlay').forEach(el => { if (el.__pmp18Dispose) el.__pmp18Dispose(); else el.remove(); });
 
     const overlay = document.createElement('div');
-    overlay.className = 'pmp18-update-overlay';
+    overlay.className = `pmp18-update-overlay pmp18-theme-${state.settings.uiTheme || 'sakura'}`;
+    applyTheme(overlay);
     overlay.setAttribute('data-pmp18-update', '1');
     // 居中：不贴顶不贴底；padding 保证四周留白
     overlay.style.cssText = [
         'position:fixed',
-        'top:0', 'left:0', 'right:0', 'bottom:0',
-        'width:100%', 'height:100%',
+        'top:var(--pmp-viewport-top,0px)', 'left:var(--pmp-viewport-left,0px)',
+        'width:var(--pmp-viewport-width,100vw)', 'height:var(--pmp-viewport-height,100dvh)',
         'z-index:2147483646',
         'display:flex',
         'align-items:center',
@@ -257,19 +268,24 @@ export async function showUpdateModal() {
         'pointer-events:auto',
         '-webkit-tap-highlight-color:transparent',
     ].join(';');
+    const unbindViewport = bindVisualViewport(overlay);
 
     let allowBackdrop = false;
     const unlock = setTimeout(() => { allowBackdrop = true; }, 500);
+    const dispose = () => { clearTimeout(unlock); unbindViewport(); overlay.remove(); };
+    overlay.__pmp18Dispose = dispose;
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dispose(); } });
 
     const paint = (info = {}) => {
         const log = extractChangelogForVersion(info.changelog || '', info.remoteVersion || VERSION);
         const available = Boolean(info.available);
         const checking = Boolean(info.checking);
-        const err = info.error ? String(info.error) : '';
+        const err = info.error ? String(info.message || '更新检查暂时不可用') : '';
         // 中间卡片：宽度适中，不贴边
         const cardStyle = [
             'width:min(420px, calc(100vw - 48px))',
-            'max-height:min(70vh, 70dvh)',
+            'max-height:min(70dvh, calc(var(--pmp-viewport-height, 100dvh) - 32px))',
+            'min-height:0',
             'border-radius:16px',
             'overflow:hidden',
             'display:flex',
@@ -292,15 +308,21 @@ export async function showUpdateModal() {
             </div>
             <footer class="pmp18-update-modal-footer">
                 <button type="button" class="pmp18-small-btn" data-close>关闭</button>
+                ${info.error && !checking ? '<button type="button" class="pmp18-small-btn" data-retry>重新检查</button>' : ''}
                 ${available && !checking ? '<button type="button" class="pmp18-primary-btn" data-do-update>更新</button>' : ''}
             </footer>
         </div>`;
         const close = (ev) => {
             if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-            clearTimeout(unlock);
-            overlay.remove();
+            dispose();
         };
         overlay.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = close; });
+        const retry = overlay.querySelector('[data-retry]');
+        if (retry) retry.onclick = async () => {
+            paint({ ...(state.updateInfo || {}), checking: true });
+            await checkForUpdates({ force: true, silent: true, skipRefresh: true, includeChangelog: true });
+            if (overlay.isConnected) paint({ ...(state.updateInfo || {}), checking: false });
+        };
         const modal = overlay.querySelector('.pmp18-update-modal');
         if (modal) {
             modal.addEventListener('click', e => e.stopPropagation());
@@ -334,8 +356,7 @@ export async function showUpdateModal() {
             e.stopPropagation();
             return;
         }
-        clearTimeout(unlock);
-        overlay.remove();
+        dispose();
     };
     overlay.addEventListener('click', onBackdrop);
     overlay.addEventListener('touchend', onBackdrop, { passive: false });
@@ -351,7 +372,7 @@ export async function showUpdateModal() {
     }
 
     // 拉取时不要整页 refreshUi，否则会清掉挂在 root 里的弹层
-    checkForUpdates({ silent: true, skipRefresh: true }).then(() => {
+    checkForUpdates({ silent: true, skipRefresh: true, includeChangelog: true }).then(() => {
         if (!overlay.isConnected) return;
         paint({ ...(state.updateInfo || {}), checking: false });
     }).catch((e) => {
@@ -366,5 +387,6 @@ export function scheduleAutoUpdateCheck() {
     // Defer so first paint is not blocked
     setTimeout(() => {
         checkForUpdates({ silent: true }).catch(() => {});
-    }, 800);
+    }, 1800);
 }
+
