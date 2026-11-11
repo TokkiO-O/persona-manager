@@ -1123,7 +1123,8 @@ export function ensureRoot() {
         if (action === 'delete-category') {
             const id = String(target.dataset.id || '');
             if (!confirm('删除该分类？人设上的分类标记会清除')) return;
-            deleteCategoryDef(id);
+            try { deleteCategoryDef(id); }
+            catch (error) { if (typeof toastr !== 'undefined') toastr.error(error.message); return; }
             try { window.__pmp18NativeTags?.refresh?.(); } catch {}
             renderManager();
             return;
@@ -1169,7 +1170,8 @@ export function ensureRoot() {
         if (action === 'delete-tag-def') {
             const id = String(target.dataset.id || '');
             if (!confirm('删除该标签定义？人设上的此标签也会移除')) return;
-            deleteTagDef(id);
+            try { deleteTagDef(id); }
+            catch (error) { if (typeof toastr !== 'undefined') toastr.error(error.message); return; }
             if (state.filterTagId === id) state.filterTagId = null;
             try { window.__pmp18NativeTags?.refresh?.(); } catch {}
             renderManager();

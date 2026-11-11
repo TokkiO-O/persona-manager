@@ -55,13 +55,8 @@ export function createCategory(name) {
 }
 
 export function deleteCategoryDef(id) {
-    state.settings.categoryDefs = getCategoryDefs().filter(c => c.id !== id);
-    const map = getCategoryMap();
-    Object.keys(map).forEach(pid => {
-        map[pid] = (map[pid] || []).filter(x => x !== id);
-        if (!map[pid].length) delete map[pid];
-    });
-    saveSettingsLocal();
+    if (!getCategoryById(String(id))) return false;
+    return applyOrganizeBatch([], { categories: { mode: 'delete', ids: [id] } }).deletedCategories > 0;
 }
 
 export function setPersonaCategories(personaId, categoryIds) {

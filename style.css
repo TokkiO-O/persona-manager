@@ -306,6 +306,8 @@ body.pmp18-open { overflow: hidden; }
 .pmp18-batch-color { display:flex;align-items:center;gap:9px;font-size:11px;color:var(--pmp-muted); }
 .pmp18-batch-color input[type=color] { width:40px;height:32px;min-width:40px;padding:3px;border-radius:8px;cursor:pointer; }
 .pmp18-batch-organize-overlay .pmp18-tag-chip { margin:0; }
+.pmp18-batch-organize-overlay [data-batch-apply].pmp18-danger-btn { color:#fff !important;background:#a74758;border-color:#a74758; }
+.pmp18-batch-organize-overlay [data-batch-apply].pmp18-danger-btn:hover:not(:disabled) { background:#90384a;border-color:#90384a; }
 
 /* Adopt: editable fragment, placement and full result */
 .pmp18-adopt-layout { display: grid; grid-template-columns: 275px minmax(0,1fr); gap: 22px; min-height: 0; flex: 1; }

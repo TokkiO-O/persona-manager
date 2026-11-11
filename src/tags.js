@@ -1,5 +1,6 @@
 import { TAG_COLOR_PRESETS } from './constants.js';
 import { state, saveSettingsLocal } from './state.js';
+import { applyOrganizeBatch } from './organize.js';
 
 function uid() {
     return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -49,13 +50,8 @@ export function updateTag(id, patch) {
 }
 
 export function deleteTagDef(id) {
-    state.settings.tagDefs = getTagDefs().filter(t => t.id !== id);
-    const map = getTagMap();
-    for (const k of Object.keys(map)) {
-        map[k] = (map[k] || []).filter(x => x !== id);
-        if (!map[k].length) delete map[k];
-    }
-    saveSettingsLocal();
+    if (!getTagById(String(id))) return false;
+    return applyOrganizeBatch([], { tags: { mode: 'delete', ids: [id] } }).deletedTags > 0;
 }
 
 export function setPersonaTags(personaId, tagIds) {

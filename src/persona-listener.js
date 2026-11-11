@@ -154,8 +154,11 @@ function parseJsonArr(s) {
 function renderOrgPanel(panel, block) {
     const catDefs = getCategoryDefs();
     const tagDefs = getTagDefs();
-    let selCat = new Set(parseJsonArr(panel.dataset.cats));
-    let selTag = new Set(parseJsonArr(panel.dataset.tags));
+    let selCat = new Set(parseJsonArr(panel.dataset.cats).filter(id => catDefs.some(item => item.id === id)));
+    let selTag = new Set(parseJsonArr(panel.dataset.tags).filter(id => tagDefs.some(item => item.id === id)));
+    const cats = JSON.stringify([...selCat]), tags = JSON.stringify([...selTag]);
+    if (panel.dataset.cats !== cats) panel.dataset.cats = cats;
+    if (panel.dataset.tags !== tags) panel.dataset.tags = tags;
     panel.dataset.definitions = JSON.stringify([catDefs, tagDefs]);
 
     panel.innerHTML = `
