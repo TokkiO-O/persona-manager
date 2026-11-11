@@ -306,8 +306,8 @@ body.pmp18-open { overflow: hidden; }
 .pmp18-batch-color { display:flex;align-items:center;gap:9px;font-size:11px;color:var(--pmp-muted); }
 .pmp18-batch-color input[type=color] { width:40px;height:32px;min-width:40px;padding:3px;border-radius:8px;cursor:pointer; }
 .pmp18-batch-organize-overlay .pmp18-tag-chip { margin:0; }
-.pmp18-batch-organize-overlay [data-batch-apply].pmp18-danger-btn { color:#fff !important;background:#a74758;border-color:#a74758; }
-.pmp18-batch-organize-overlay [data-batch-apply].pmp18-danger-btn:hover:not(:disabled) { background:#90384a;border-color:#90384a; }
+.pmp18-batch-organize-overlay .pmp18-batch-plus { display:inline-flex;align-self:center;align-items:center;justify-content:center;flex:0 0 38px;width:38px;height:38px;padding:0;border:1px dashed var(--pmp-accent);border-radius:10px;background:var(--pmp-surface);color:var(--pmp-accent-strong);font-size:24px;line-height:1; }
+.pmp18-batch-organize-overlay .pmp18-batch-plus[aria-expanded=true] { background:var(--pmp-accent-soft);border-style:solid; }
 
 /* Adopt: editable fragment, placement and full result */
 .pmp18-adopt-layout { display: grid; grid-template-columns: 275px minmax(0,1fr); gap: 22px; min-height: 0; flex: 1; }

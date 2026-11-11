@@ -55,8 +55,26 @@ export function createCategory(name) {
 }
 
 export function deleteCategoryDef(id) {
-    if (!getCategoryById(String(id))) return false;
-    return applyOrganizeBatch([], { categories: { mode: 'delete', ids: [id] } }).deletedCategories > 0;
+    const key = String(id);
+    if (!getCategoryById(key)) return false;
+    const previousDefs = getCategoryDefs(), previousMap = state.settings.categoryMap;
+    const hadMap = Object.prototype.hasOwnProperty.call(state.settings, 'categoryMap');
+    const nextMap = { ...(previousMap || {}) };
+    for (const [person, raw] of Object.entries(previousMap || {})) {
+        const values = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? [raw] : [];
+        if (!values.includes(key)) continue;
+        const kept = values.filter(value => value !== key);
+        if (kept.length) nextMap[person] = kept; else delete nextMap[person];
+    }
+    state.settings.categoryDefs = previousDefs.filter(item => item.id !== key);
+    state.settings.categoryMap = nextMap;
+    if (!saveSettingsLocal()) {
+        state.settings.categoryDefs = previousDefs;
+        if (hadMap) state.settings.categoryMap = previousMap; else delete state.settings.categoryMap;
+        throw new Error('分类未能保存，请检查浏览器存储空间后重试。');
+    }
+    if (state.filterCategoryId === key) state.filterCategoryId = null;
+    return true;
 }
 
 export function setPersonaCategories(personaId, categoryIds) {

@@ -1,6 +1,5 @@
 import { TAG_COLOR_PRESETS } from './constants.js';
 import { state, saveSettingsLocal } from './state.js';
-import { applyOrganizeBatch } from './organize.js';
 
 function uid() {
     return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -50,8 +49,26 @@ export function updateTag(id, patch) {
 }
 
 export function deleteTagDef(id) {
-    if (!getTagById(String(id))) return false;
-    return applyOrganizeBatch([], { tags: { mode: 'delete', ids: [id] } }).deletedTags > 0;
+    const key = String(id);
+    if (!getTagById(key)) return false;
+    const previousDefs = getTagDefs(), previousMap = state.settings.tagMap;
+    const hadMap = Object.prototype.hasOwnProperty.call(state.settings, 'tagMap');
+    const nextMap = { ...(previousMap || {}) };
+    for (const [person, raw] of Object.entries(previousMap || {})) {
+        const values = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? [raw] : [];
+        if (!values.includes(key)) continue;
+        const kept = values.filter(value => value !== key);
+        if (kept.length) nextMap[person] = kept; else delete nextMap[person];
+    }
+    state.settings.tagDefs = previousDefs.filter(item => item.id !== key);
+    state.settings.tagMap = nextMap;
+    if (!saveSettingsLocal()) {
+        state.settings.tagDefs = previousDefs;
+        if (hadMap) state.settings.tagMap = previousMap; else delete state.settings.tagMap;
+        throw new Error('标签未能保存，请检查浏览器存储空间后重试。');
+    }
+    if (state.filterTagId === key) state.filterTagId = null;
+    return true;
 }
 
 export function setPersonaTags(personaId, tagIds) {
